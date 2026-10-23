@@ -8,8 +8,7 @@ async function submitToJudge0(code, language_id, stdin = "") {
       source_code: code,
       language_id: language_id,
       stdin: stdin, // ✅ Use the passed stdin value
-      cpu_time_limit: 5,
-      memory_limit: 128000
+      cpu_time_limit: 5
     }
   );
   return response.data.token;
