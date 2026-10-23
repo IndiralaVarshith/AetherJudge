@@ -1,0 +1,187 @@
+services:
+  # ─────────────────────────────────────────────────────────────
+  # AetherJudge Database (PostgreSQL)
+  # ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: aether-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-admin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-admin123}
+      POSTGRES_DB: ${DB_NAME:-aetherjudge}
+    volumes:
+      - aether_pgdata:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-admin} -d ${DB_NAME:-aetherjudge}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aether_internal
+
+  # ─────────────────────────────────────────────────────────────
+  # AetherJudge Redis (Queue & Caching)
+  # ─────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: aether-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - aether_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aether_internal
+
+  # ─────────────────────────────────────────────────────────────
+  # Judge0 PostgreSQL Database
+  # ─────────────────────────────────────────────────────────────
+  judge0-db:
+    image: postgres:16.2
+    container_name: judge0-db
+    restart: unless-stopped
+    env_file: ./judge0/judge0.conf
+    volumes:
+      - judge0_pgdata:/var/lib/postgresql/data
+    networks:
+      - aether_internal
+
+  # ─────────────────────────────────────────────────────────────
+  # Judge0 Redis
+  # ─────────────────────────────────────────────────────────────
+  judge0-redis:
+    image: redis:7.2.4
+    container_name: judge0-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "no", "--requirepass", "judge0_secure_redis_password_2026"]
+    networks:
+      - aether_internal
+
+  # ─────────────────────────────────────────────────────────────
+  # Judge0 Server (Execution API)
+  # ─────────────────────────────────────────────────────────────
+  judge0-server:
+    image: judge0/judge0:latest
+    container_name: judge0-server
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - ./judge0/judge0.conf:/judge0.conf:ro
+    depends_on:
+      - judge0-db
+      - judge0-redis
+    networks:
+      - aether_internal
+
+  # ─────────────────────────────────────────────────────────────
+  # Judge0 Worker (Execution Runner)
+  # ─────────────────────────────────────────────────────────────
+  judge0-worker:
+    image: judge0/judge0:latest
+    container_name: judge0-worker
+    restart: unless-stopped
+    command: ["./scripts/workers"]
+    privileged: true
+    volumes:
+      - ./judge0/judge0.conf:/judge0.conf:ro
+    depends_on:
+      - judge0-server
+    networks:
+      - aether_internal
+
+  # ─────────────────────────────────────────────────────────────
+  # AetherJudge Backend API (Express.js)
+  # ─────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aether-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-admin}
+      DB_PASSWORD: ${DB_PASSWORD:-admin123}
+      DB_NAME: ${DB_NAME:-aetherjudge}
+      REDIS_URL: redis://redis:6379
+      JUDGE0_URL: http://judge0-server:2358
+      JWT_SECRET: ${JWT_SECRET:-aetherjudge_jwt_prod_secret_key_2026}
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN:-*}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      judge0-server:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5000/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - aether_internal
+
+  # ─────────────────────────────────────────────────────────────
+  # AetherJudge Queue Worker (Node.js Background Daemon)
+  # ─────────────────────────────────────────────────────────────
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aether-worker
+    command: ["node", "redisQueue/worker.js"]
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-admin}
+      DB_PASSWORD: ${DB_PASSWORD:-admin123}
+      DB_NAME: ${DB_NAME:-aetherjudge}
+      REDIS_URL: redis://redis:6379
+      JUDGE0_URL: http://judge0-server:2358
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      judge0-server:
+        condition: service_started
+    networks:
+      - aether_internal
+
+  # ─────────────────────────────────────────────────────────────
+  # Nginx Reverse Proxy (Public Entry Point)
+  # ─────────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: aether-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./backend/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - aether_internal
+
+volumes:
+  aether_pgdata:
+  aether_redisdata:
+  judge0_pgdata:
+
+networks:
+  aether_internal:
+    driver: bridge

@@ -10,13 +10,25 @@ const pool = require("./db"); // ✅ Ensure this matches your db.js export
 
 const app = express();
 
-// ✅ Middleware
+// ✅ Dynamic CORS for deployed frontend (Vercel) + local dev
+const allowedOrigins = [
+  "http://localhost:5173",
+  process.env.CLIENT_ORIGIN,
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
 app.use(cors({
-  origin: "http://localhost:5173", // Frontend dev server
-  credentials: true // ✅ Allows cookies to be sent cross-origin
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes("*") || allowedOrigins.includes(origin) || origin.startsWith("http://localhost")) {
+      callback(null, true);
+    } else {
+      callback(null, true);
+    }
+  },
+  credentials: true
 }));
 app.use(express.json());
-app.use(cookieParser()); // ✅ Parses incoming cookies
+app.use(cookieParser());
 
 // ✅ Routes
 app.get("/health", (req, res) => res.json({ status: "ok" }));
@@ -31,7 +43,9 @@ app.get("/api/submissions/:id/stream", (req, res) => {
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no"); // ✅ Prevents Nginx from buffering SSE
-  res.setHeader("Access-Control-Allow-Origin", "*"); // CORS for dev
+  const requestOrigin = req.headers.origin || "*";
+  res.setHeader("Access-Control-Allow-Origin", requestOrigin);
+  res.setHeader("Access-Control-Allow-Credentials", "true");
 
   const submissionId = req.params.id;
   let interval = null;
@@ -96,8 +110,24 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
+const fs = require("fs");
+const path = require("path");
+
+async function initDb() {
+  try {
+    const initSqlPath = path.join(__dirname, "../init.sql");
+    if (fs.existsSync(initSqlPath)) {
+      const sql = fs.readFileSync(initSqlPath, "utf8");
+      await pool.query(sql);
+      console.log("✅ Database schema initialized and verified");
+    }
+  } catch (err) {
+    console.warn("⚠️ Database init check:", err.message);
+  }
+}
 
 async function start() {
+  await initDb();
   await connectRedis();
   app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
 }
