@@ -1,0 +1,90 @@
+# x-logging:
+#   &default-logging
+#   logging:
+#     driver: json-file
+#     options:
+#       max-size: 100M
+
+# services:
+#   server:
+#     image: judge0/judge0:latest
+#     volumes:
+#       - ./judge0.conf:/judge0.conf:ro
+#     ports:
+#       - "2358:2358"
+#     privileged: true
+#     <<: *default-logging
+#     restart: always
+
+#   worker:
+#     image: judge0/judge0:latest
+#     command: ["./scripts/workers"]
+#     volumes:
+#       - ./judge0.conf:/judge0.conf:ro
+#     privileged: true
+#     <<: *default-logging
+#     restart: always
+
+#   db:
+#     image: postgres:16.2
+#     env_file: judge0.conf
+#     volumes:
+#       - data:/var/lib/postgresql/data/
+#     <<: *default-logging
+#     restart: always
+
+#   redis:   # ✅ MUST be inside services
+#     image: redis:7.2.4
+#     command: ["redis-server", "--appendonly", "no"]
+#     <<: *default-logging
+#     restart: always
+
+# volumes:
+#   data:
+
+
+
+x-logging:
+  &default-logging
+  logging:
+    driver: json-file
+    options:
+      max-size: 100M
+
+services:
+  server:
+    image: judge0/judge0:latest
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    ports:
+      - "2358:2358"
+    privileged: true
+    <<: *default-logging
+    restart: always
+
+  worker:
+    image: judge0/judge0:latest
+    command: ["./scripts/workers"]
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    privileged: true
+    <<: *default-logging
+    restart: always
+
+  db:
+    image: postgres:16.2
+    env_file: judge0.conf
+    volumes:
+      - data:/var/lib/postgresql/data/
+    <<: *default-logging
+    restart: always
+
+  redis:
+    image: redis:7.2.4
+    # 🔴 FIX: Added --requirepass to match Judge0's authentication needs
+    command: ["redis-server", "--appendonly", "no", "--requirepass", "judge0_secure_redis_password_2026"]
+    <<: *default-logging
+    restart: always
+
+volumes:
+  data:
