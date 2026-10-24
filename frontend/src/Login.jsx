@@ -1,87 +1,46 @@
-import { useState } from "react";
-import axios from "axios";
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import Icon from './components/Icon.jsx';
 
-function Login({ onLogin }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost/api';
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
+export default function Login() {
+  const navigate = useNavigate();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async event => {
+    event.preventDefault();
+    setError('');
+    setLoading(true);
     try {
-      const apiBase = import.meta.env.VITE_API_BASE || "http://localhost:5000/api";
-      const res = await axios.post(`${apiBase}/auth/login`, {
-        email,
-        password
-      });
-      localStorage.setItem("token", res.data.token);
-      onLogin();
+      const response = await axios.post(`${API_BASE}/auth/login`, { email, password }, { withCredentials: true });
+      if (response.data.user?.id) localStorage.setItem('userId', String(response.data.user.id));
+      navigate('/app');
     } catch (err) {
-      setError(err.response?.data?.error || "Login failed");
+      setError(err.response?.data?.error || 'Sign in failed. Check your connection and try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div style={{ 
-      height: "100vh", 
-      display: "flex", 
-      alignItems: "center", 
-      justifyContent: "center",
-      background: "#1e1e1e"
-    }}>
-      <form onSubmit={handleLogin} style={{ 
-        padding: "2rem", 
-        background: "#2d2d2d",
-        borderRadius: "12px",
-        width: "400px"
-      }}>
-        <h1 style={{ color: "#fff", marginBottom: "1.5rem", textAlign: "center" }}>🧠 AetherJudge</h1>
-        {error && <div style={{ color: "#f87171", marginBottom: "1rem" }}>{error}</div>}
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          style={{ 
-            width: "100%", 
-            padding: "0.75rem", 
-            marginBottom: "1rem",
-            background: "#1e1e1e",
-            border: "1px solid #404040",
-            color: "#fff",
-            borderRadius: "6px"
-          }}
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          style={{ 
-            width: "100%", 
-            padding: "0.75rem", 
-            marginBottom: "1rem",
-            background: "#1e1e1e",
-            border: "1px solid #404040",
-            color: "#fff",
-            borderRadius: "6px"
-          }}
-        />
-        <button type="submit" style={{ 
-          width: "100%", 
-          padding: "0.75rem",
-          background: "#22c55e",
-          color: "white",
-          border: "none",
-          borderRadius: "6px",
-          cursor: "pointer",
-          fontWeight: 600
-        }}>
-          Login
-        </button>
-      </form>
-    </div>
+    <main className="auth-page">
+      <section className="auth-card">
+        <span className="brand-mark"><Icon name="logo" size={18} /></span>
+        <h1>Welcome back</h1>
+        <p className="auth-copy">Sign in to continue your practice.</p>
+        <form className="auth-form" onSubmit={handleLogin}>
+          <label><span className="field-label">Email</span><input className="text-input" type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} required /></label>
+          <label><span className="field-label">Password</span><input className="text-input" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></label>
+          {error && <div className="inline-error" role="alert">{error}</div>}
+          <button className="primary-button" type="submit" disabled={loading}>{loading ? <><span className="spinner" /> Signing in…</> : 'Sign in'}</button>
+        </form>
+        <p className="auth-footer">Your session is secured with an HTTP-only cookie.</p>
+      </section>
+    </main>
   );
 }
-
-export default Login;
