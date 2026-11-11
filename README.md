@@ -122,6 +122,38 @@ Visit **http://localhost:5173** in your browser.
 
 ---
 
+## 📚 Importing Problems
+
+Problems come from open datasets and are imported with scripts in `backend/importers/`. Both are safe to re-run: anything already in the database is skipped.
+
+```bash
+cd backend
+npm run import:taco -- --easy 200 --medium 200 --hard 100   # TACO dataset (Apache-2.0)
+npm run import:exercism                                     # Exercism problem-specifications (MIT)
+```
+
+Add `--dry-run` to either command to see what would be added without saving anything.
+
+**No duplicates.** Every problem, whatever its source (including ones created through `POST /api/problems`), passes four checks before it is published:
+
+| Check | Catches | Result |
+| :--- | :--- | :--- |
+| Same source + source id | Re-running an import | Skipped |
+| Same statement fingerprint | Copies with different formatting or constants | Skipped |
+| Same test cases | The same problem in different words | Skipped, or held for review when only most tests match |
+| Similar wording (`pg_trgm`) or same title | Near copies and paraphrases | Skipped when near-identical, otherwise held for review |
+
+Problems held for review are stored with `status = 'review'` and `duplicate_of = <id>` and stay hidden from users. To list them:
+
+```sql
+SELECT id, title, source, duplicate_of, similarity FROM problems WHERE status = 'review';
+-- approve one:  UPDATE problems SET status = 'published' WHERE id = <id>;
+```
+
+Only sample test cases are sent to the browser. Hidden test cases are read by the worker directly from the database.
+
+---
+
 ## 🌐 ₹0 Cloud Deployment Guide
 
 AetherJudge is engineered for a **completely free (₹0)** two-tier deployment:

@@ -60,8 +60,10 @@ async function processJob(job) {
           const statusId = result.status.id;
 
           // ✅ NEW DEBUGGING + COMPARISON LOGIC
-          const actualOutput = result.stdout?.trim() || "";
-          const expectedOutput = tc.expected_output?.trim() || "";
+          // Compare line by line, ignoring trailing spaces and trailing blank lines.
+          const normalizeOutput = text => (text || "").replace(/\r\n?/g, "\n").split("\n").map(line => line.trimEnd()).join("\n").trim();
+          const actualOutput = normalizeOutput(result.stdout);
+          const expectedOutput = normalizeOutput(tc.expected_output);
 
           console.log(`\n📊 Test Case Comparison:`);
           console.log(`   Expected: "${expectedOutput}"`);

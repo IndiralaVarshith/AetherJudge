@@ -49,6 +49,44 @@ CREATE TABLE IF NOT EXISTS failed_jobs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- ─────────────────────────────────────────────────────────────
+-- Problem provenance + de-duplication (idempotent: safe on every start)
+-- ─────────────────────────────────────────────────────────────
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS slug TEXT;
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS source VARCHAR(50) NOT NULL DEFAULT 'manual';
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS source_id TEXT;
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS source_url TEXT;
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS license TEXT;
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
+-- 'published' = visible, 'review' = looks like an existing problem, hidden until approved
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'published';
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS text_hash CHAR(64);    -- fingerprint of the normalised statement
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS tests_hash CHAR(64);   -- fingerprint of the set of (input, output) pairs
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS test_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS norm_text TEXT;        -- normalised statement, used for similarity search
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS duplicate_of INTEGER REFERENCES problems(id) ON DELETE SET NULL;
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS similarity REAL;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS pair_hash CHAR(64);  -- fingerprint of one (input, output) pair
+
+-- Layer 1: one row per (source, source_id). Layer 2: one row per statement fingerprint.
+CREATE UNIQUE INDEX IF NOT EXISTS problems_source_uq ON problems (source, source_id) WHERE source_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS problems_text_hash_uq ON problems (text_hash) WHERE text_hash IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS problems_slug_uq ON problems (slug) WHERE slug IS NOT NULL;
+CREATE INDEX IF NOT EXISTS problems_tests_hash_idx ON problems (tests_hash);
+CREATE INDEX IF NOT EXISTS problems_status_idx ON problems (status);
+CREATE INDEX IF NOT EXISTS test_cases_problem_idx ON test_cases (problem_id);
+CREATE INDEX IF NOT EXISTS test_cases_pair_hash_idx ON test_cases (pair_hash);
+
+-- Layer 4: similar-wording search. Skipped (with a notice) if the database
+-- does not allow the pg_trgm extension; the other layers still work.
+DO $$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS pg_trgm;
+  CREATE INDEX IF NOT EXISTS problems_norm_text_trgm ON problems USING gin (norm_text gin_trgm_ops);
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'pg_trgm unavailable (%), similar-wording check disabled', SQLERRM;
+END $$;
+
 -- Seed Initial Problems
 INSERT INTO problems (id, title, description, difficulty, time_limit, memory_limit)
 VALUES 
@@ -64,7 +102,7 @@ ON CONFLICT (id) DO NOTHING;
 
 -- Seed Initial Test Cases
 INSERT INTO test_cases (problem_id, input, expected_output, is_sample)
-VALUES
+SELECT v.problem_id, v.input, v.expected_output, v.is_sample FROM (VALUES
 (1, E'2 7\n9', '0 1', true),
 (1, E'3 3\n6', '0 1', false),
 (1, E'1 5\n6', '0 1', false),
@@ -89,7 +127,9 @@ VALUES
 (8, E'1 3 5 7 9\n5', '2', true),
 (8, E'1 3 5 7 9\n4', '-1', false),
 (8, E'2 4 6 8 10\n10', '4', false)
-ON CONFLICT DO NOTHING;
+) AS v(problem_id, input, expected_output, is_sample)
+-- only seed when the starter problems have no tests yet (this file runs on every API start)
+WHERE NOT EXISTS (SELECT 1 FROM test_cases WHERE problem_id BETWEEN 1 AND 8);
 
 -- Adjust sequence values
 SELECT setval('problems_id_seq', (SELECT COALESCE(MAX(id), 1) FROM problems));
