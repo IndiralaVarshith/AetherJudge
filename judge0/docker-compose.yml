@@ -78,6 +78,10 @@ services:
       - data:/var/lib/postgresql/data/
     <<: *default-logging
     restart: always
+    networks:
+      default:
+        aliases:
+          - judge0-db
 
   redis:
     image: redis:7.2.4
@@ -85,6 +89,10 @@ services:
     command: ["redis-server", "--appendonly", "no", "--requirepass", "judge0_secure_redis_password_2026"]
     <<: *default-logging
     restart: always
+    networks:
+      default:
+        aliases:
+          - judge0-redis
 
 volumes:
   data:

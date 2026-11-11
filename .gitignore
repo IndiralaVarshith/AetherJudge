@@ -8,6 +8,12 @@ node_modules/
 .env
 .env.*
 !.env.example
+!.env*.example
+!.env.production.example
+certs/*.pem
+certs/*.key
+certs/*.crt
+certbot/
 
 # OS generated files
 .DS_Store
@@ -53,3 +59,6 @@ judge0/coverage/
 judge0/srv/
 judge0/environment
 judge0/pull.log
+
+# Claude Code local settings
+.claude/settings.local.json

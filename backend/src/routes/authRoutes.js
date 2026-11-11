@@ -5,7 +5,7 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const pool = require("../db");
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_in_prod";
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // ✅ Cookie options (secure: false for localhost HTTP, change to true for HTTPS later)
 const COOKIE_OPTIONS = {

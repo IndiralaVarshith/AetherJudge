@@ -5,7 +5,9 @@
 # ==============================================================================
 
 set -e
-
+if [ -f ./.env.production ]; then
+  source ./.env.production
+fi
 echo "🚀 Starting AetherJudge Production Deployment..."
 
 # 1. Update system packages
