@@ -64,7 +64,7 @@ flowchart TD
   - Timer, Zen mode (`Alt Z`), font size, reset to starter code, previous / next / random problem.
   - Shortcuts: `⌥ ↵` run, `⌘ ↵` (Ctrl ↵) submit, `⌘ K` (Ctrl K) search anything.
 - **Motivation:** XP (easy +10, medium +25, hard +50), levels, daily streaks, confetti on accepted solutions, a daily problem, a leaderboard and a profile page with an activity heatmap.
-- **Accounts:** sign up / sign in. Without an account you practise as a guest.
+- **Accounts:** sign up / sign in with secure sessions; progress is saved per user (see [Accounts & Sessions](#-accounts--sessions)). Guests can practise, but nothing is saved for them.
 - **Dark and light themes**, works on phones.
 
 ---
@@ -226,6 +226,77 @@ Only sample test cases are sent to the browser. Hidden test cases are read by th
 
 ---
 
+## 🔐 Accounts & Sessions
+
+- **Sign up** needs a username (3–20 letters, numbers or `_`, unique ignoring case), an email (unique, stored lowercase) and a password of 8–72 characters. Passwords are stored as bcrypt hashes (cost 12), never in plain text.
+- **Sessions** are a signed token (JWT, 7 days) in an **HTTP-only cookie**, so page scripts can't read it. On load the site calls `GET /api/auth/me` to check it; an expired or missing cookie means signed out.
+- **Your data is yours:** submissions, history, stats and the live verdict stream are tied to the session on the server. A user id sent by the browser is ignored, and nobody can read another user's submissions.
+- **Continue with Google** (optional): one-click sign-in once you set `GOOGLE_CLIENT_ID` (see below). The server verifies every Google token with Google's official library and only accepts emails Google has verified.
+  - The first Google sign-in creates an account (username from the person's name), with no password.
+  - If someone already signed up with a password using the same email, Google is linked to that account instead of creating a second one. Both ways of signing in then work.
+- **Guests** can run and submit code, but nothing is saved for them. Accepted solutions prompt them to create an account.
+- **Data is kept** until it is deleted. Sessions expire after 7 days (just sign in again); accounts and submissions don't expire.
+- **Abuse limits** (per API process): 10 sign-in attempts per 15 minutes per IP and email, 30 Google sign-ins per 15 minutes per IP, 10 sign-ups per hour per IP, 20 runs/submissions per minute per user (or per IP for guests), and 64 KB of code per request.
+
+| Endpoint | What it does |
+| :--- | :--- |
+| `POST /api/auth/register` | Create an account and sign in |
+| `POST /api/auth/login` | Sign in with email and password |
+| `POST /api/auth/google` | Sign in or sign up with a Google ID token |
+| `GET /api/auth/config` | Public sign-in settings (the Google client ID, or `null`) |
+| `GET /api/auth/me` | Who is signed in (`{ "user": null }` for guests) |
+| `POST /api/auth/logout` | Sign out |
+
+### Setting up "Continue with Google" (free)
+
+The button stays hidden until the server has a Google client ID. To get one:
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) with your Google account and create a project (e.g. "AetherJudge").
+2. Go to **APIs & Services → OAuth consent screen** (also called **Google Auth Platform → Branding**):
+   - user type **External**;
+   - app name **AetherJudge**, your support email, your developer contact email;
+   - no extra scopes are needed (email and profile are included).
+3. Under **Audience**, the app starts in **Testing**: only the Google accounts you add under **Test users** can sign in. Click **Publish app** when you're ready for everyone. Email and profile sign-in does not need Google's review.
+4. Go to **Credentials → Create credentials → OAuth client ID**:
+   - application type **Web application**;
+   - under **Authorized JavaScript origins**, add `http://localhost:5173` and `http://localhost` for local development, plus your real site later (e.g. `https://aetherjudge.vercel.app`);
+   - no redirect URIs are needed (the button uses a popup).
+5. Copy the **Client ID** (it ends in `.apps.googleusercontent.com`) into `backend/.env`:
+   ```bash
+   GOOGLE_CLIENT_ID=1234567890-abc123.apps.googleusercontent.com
+   ```
+6. Restart the API (`npm run dev` in `backend/`). The **Continue with Google** button now appears on the sign-in page.
+
+The client ID is public by design (it appears in the page). There is no client secret to keep: this flow doesn't use one. Origin changes in Google Cloud can take a few minutes to apply.
+
+> [!IMPORTANT]
+> **Production needs HTTPS on the API.** When the frontend (e.g. Vercel) and the API are on different domains, browsers only send the session cookie with `SameSite=None; Secure`, which works over HTTPS only. That is the production default. Also set a long random `JWT_SECRET`: the API refuses to issue sessions in production without one.
+
+---
+
+## 📈 How Many Users Can It Handle on Free Resources?
+
+These are estimates for the free deployment below, not load-test results.
+
+**Accounts and saved data:** storage is not the limit. Measured locally: all 1,054 problems with their tests take about 16 MB, and one submission row averages about 270 bytes plus the code itself (usually 0.5–2 KB).
+- On a free managed Postgres with about 0.5 GB (Neon, Supabase), that is roughly **200,000–400,000 saved submissions**, enough for thousands of active users.
+- Postgres on the free VM's own disk (tens of GB) holds millions.
+
+**People using the site at the same time:** browsing problems, albums and profiles is cheap. A single small server handles a few hundred people at once.
+
+**People submitting at the same time:** Judge0 is the bottleneck. On the free Oracle AMD micro VM (1/8 CPU, 1 GB RAM) one worker judges one submission at a time:
+- a Python or C++ test takes roughly 0.1–0.5 s; Java takes longer because the JVM starts for every test;
+- a 10-test submission takes about 2–10 s, so the server judges about **6–30 submissions per minute**.
+
+If an active coder submits every 3–5 minutes, that is **about 30–100 people coding at the same moment** before the queue starts to lag. Extra submissions wait in the queue rather than fail, and the per-user rate limit keeps one person from hogging it.
+
+**To grow beyond that:**
+- a bigger x86 server, or more Judge0 workers;
+- Judge0 runs well on cheap x86 VPSs;
+- Oracle's free ARM VMs are larger, but the Judge0 image is x86-only, so it would run under slow emulation there.
+
+---
+
 ## 🌐 ₹0 Cloud Deployment Guide
 
 AetherJudge is engineered for a **completely free (₹0)** two-tier deployment:
@@ -309,6 +380,9 @@ The script automatically:
 | `JUDGE0_URL` | Judge0 server URL | `http://localhost:2358` |
 | `JWT_SECRET` | Secret key for signing login tokens | any long random string |
 | `ADMIN_SECRET` | Required in the `x-admin-secret` header to create problems via `POST /api/problems` | any long random string |
+| `COOKIE_SAMESITE` | Optional. Session cookie SameSite policy. Defaults to `lax` locally and `none` in production | `none` |
+| `COOKIE_SECURE` | Optional. `true` sends the cookie over HTTPS only. Defaults to `false` locally and `true` in production | `true` |
+| `GOOGLE_CLIENT_ID` | Optional. Enables "Continue with Google" (see [setup](#setting-up-continue-with-google-free)) | `1234…apps.googleusercontent.com` |
 
 ---
 

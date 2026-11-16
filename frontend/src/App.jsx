@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Group, Panel, Separator } from 'react-resizable-panels';
 import { toast } from 'sonner';
 import EditorPanel from './components/EditorPanel.jsx';
 import ProblemPanel from './components/ProblemPanel.jsx';
 import ProblemSidebar from './components/ProblemSidebar.jsx';
-import { api, currentUserParam, errorMessage, API_BASE } from './api.js';
+import { api, errorMessage, API_BASE } from './api.js';
 import { useApp } from './lib/useApp.js';
 import { celebrate } from './lib/celebrate.js';
-import { draftKey, getUser, load, remove, save } from './lib/storage.js';
+import { draftKey, load, remove, save } from './lib/storage.js';
 import { levelFor, vibe, XP_FOR } from './lib/meta.js';
 
 // Beginner-friendly starter code: read from standard input, print the answer.
@@ -58,7 +58,8 @@ const TEMPLATES = {
 };
 
 export default function Workspace() {
-  const { theme, stats, solvedIds, refreshStats } = useApp();
+  const { theme, stats, solvedIds, refreshStats, user } = useApp();
+  const navigate = useNavigate();
   // The URL holds the album and problem (/app?album=strings&problem=12), so the Albums,
   // Guide and ⌘K palette can link straight to them.
   const [searchParams, setSearchParams] = useSearchParams();
@@ -89,7 +90,7 @@ export default function Workspace() {
 
   const fetchHistory = useCallback(async () => {
     try {
-      const response = await api.get(`/submissions/history?userId=${encodeURIComponent(currentUserParam())}`);
+      const response = await api.get('/submissions/history');
       setHistory(response.data);
     } catch { /* history is a nice-to-have */ }
   }, []);
@@ -206,9 +207,17 @@ export default function Workspace() {
   }, [code, language]);
 
   const onAccepted = useCallback(async solvedProblem => {
+    celebrate(solvedProblem.difficulty);
+    if (!user) {
+      toast.success(`${solvedProblem.title} solved!`, {
+        description: 'Create a free account to save your XP and streak.',
+        action: { label: 'Join free', onClick: () => navigate('/login') },
+        duration: 8000,
+      });
+      return;
+    }
     const firstTime = !solvedIds.has(Number(solvedProblem.id));
     const before = levelFor(stats.xp).level;
-    celebrate(solvedProblem.difficulty);
     const fresh = await refreshStats();
     if (firstTime) {
       toast.success(`+${XP_FOR[solvedProblem.difficulty] || 10} XP · ${solvedProblem.title} solved!`, { description: fresh?.streak ? `🔥 ${fresh.streak}-day streak` : undefined });
@@ -219,7 +228,7 @@ export default function Workspace() {
     } else {
       toast.success('Solved again. Muscle memory unlocked 💪');
     }
-  }, [refreshStats, solvedIds, stats.xp]);
+  }, [navigate, refreshStats, solvedIds, stats.xp, user]);
 
   const submitCode = useCallback(async () => {
     if (!problem) return;
@@ -231,8 +240,8 @@ export default function Workspace() {
     setSubmission({ status: 'pending', verdict: null, passed_tests: 0, total_tests: 0 });
     const submittedProblem = problem;
     try {
-      const response = await api.post('/submit', { code, language, problemId: problem.id, userId: getUser()?.id || null });
-      const source = new EventSource(`${API_BASE}/submissions/${response.data.submissionId}/stream`);
+      const response = await api.post('/submit', { code, language, problemId: problem.id });
+      const source = new EventSource(`${API_BASE}/submissions/${response.data.submissionId}/stream`, { withCredentials: true });
       streamRef.current?.close();
       streamRef.current = source;
       source.onmessage = event => {

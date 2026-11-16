@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { api, errorMessage } from './api.js';
 import { setUser } from './lib/storage.js';
 import { Aurora, Logo } from './components/ui.jsx';
+import GoogleButton from './components/GoogleButton.jsx';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -18,21 +19,40 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const joining = mode === 'join';
 
+  const finish = (user, isNew) => {
+    setUser(user);
+    toast.success(isNew ? `Welcome to the gym, @${user.username} 🎉` : `Welcome back, @${user.username} 👋`);
+    navigate(isNew ? '/guide' : '/app');
+  };
+
+  const signInWithGoogle = async credential => {
+    setError('');
+    setLoading(true);
+    try {
+      const response = await api.post('/auth/google', { credential });
+      finish(response.data.user, response.data.created);
+    } catch (err) {
+      setError(errorMessage(err, 'Google sign-in failed. Please try again.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const submit = async event => {
     event.preventDefault();
     setError('');
+    // Same rules as the server, checked here first for instant feedback.
+    if (joining && !/^[A-Za-z0-9_]{3,20}$/.test(username.trim())) { setError('Username must be 3–20 characters: letters, numbers or _.'); return; }
     if (joining && password.length < 8) { setError('Use at least 8 characters for your password.'); return; }
     setLoading(true);
     try {
       const response = joining
         ? await api.post('/auth/register', { username: username.trim(), email: email.trim(), password })
         : await api.post('/auth/login', { email: email.trim(), password });
-      setUser(response.data.user);
-      toast.success(joining ? `Welcome to the gym, @${response.data.user.username} 🎉` : `Welcome back, @${response.data.user.username} 👋`);
-      navigate(joining ? '/guide' : '/app');
+      finish(response.data.user, joining);
     } catch (err) {
-      const fallback = joining ? 'Could not create the account. That email or username may already be taken.' : 'Sign in failed. Check your email and password.';
-      setError(err.response?.status === 500 && joining ? fallback : errorMessage(err, fallback));
+      const fallback = err.response ? 'Something went wrong. Please try again.' : 'Could not reach AetherJudge. Is the API running?';
+      setError(errorMessage(err, fallback));
     } finally {
       setLoading(false);
     }
@@ -66,12 +86,14 @@ export default function Login() {
           <h1 className="auth-title">{joining ? 'Create your account' : 'Welcome back'}</h1>
           <p className="auth-sub">{joining ? 'Takes 10 seconds. No credit card, no spam.' : 'Pick up right where you left off.'}</p>
 
+          <GoogleButton onCredential={signInWithGoogle} onError={setError} />
+
           <form className="auth-form" onSubmit={submit}>
             <AnimatePresence initial={false}>
               {joining && (
                 <motion.label key="username" className="input-wrap" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
                   <span className="label">Username</span>
-                  <span className="input-icon"><AtSign size={16} /><input className="field" value={username} onChange={event => setUsername(event.target.value.replace(/\s/g, ''))} autoComplete="username" placeholder="cracked_coder" required={joining} maxLength={30} /></span>
+                  <span className="input-icon"><AtSign size={16} /><input className="field" value={username} onChange={event => setUsername(event.target.value.replace(/\s/g, ''))} autoComplete="username" placeholder="cracked_coder" required={joining} maxLength={20} /></span>
                 </motion.label>
               )}
             </AnimatePresence>

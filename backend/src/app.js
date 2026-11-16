@@ -9,8 +9,11 @@ const problemRoutes = require("./routes/problemRoutes");
 const albumRoutes = require("./routes/albumRoutes");
 const statsRoutes = require("./routes/statsRoutes");
 const pool = require("./db"); // ✅ Ensure this matches your db.js export
+const { sessionUser } = require("./middleware/auth");
 
 const app = express();
+// Behind Nginx in production: use the client's real IP (for rate limits), not Nginx's.
+if (process.env.NODE_ENV === "production") app.set("trust proxy", 1);
 
 // ✅ Dynamic CORS for deployed frontend (Vercel) + local dev
 const allowedOrigins = [
@@ -47,11 +50,19 @@ app.get("/api/submissions/:id/stream", (req, res) => {
   res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no"); // ✅ Prevents Nginx from buffering SSE
-  const requestOrigin = req.headers.origin || "*";
-  res.setHeader("Access-Control-Allow-Origin", requestOrigin);
-  res.setHeader("Access-Control-Allow-Credentials", "true");
+  // Only echo origins we trust (credentials are sent with this stream).
+  const requestOrigin = req.headers.origin;
+  if (requestOrigin && (allowedOrigins.includes(requestOrigin) || requestOrigin.startsWith("http://localhost"))) {
+    res.setHeader("Access-Control-Allow-Origin", requestOrigin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+  }
 
   const submissionId = req.params.id;
+  if (!/^\d+$/.test(submissionId)) {
+    res.write(`data: ${JSON.stringify({ error: "Invalid submission id" })}\n\n`);
+    return res.end();
+  }
+  const viewer = sessionUser(req);
   let interval = null;
 
   // Send initial connection confirmation
@@ -60,12 +71,19 @@ app.get("/api/submissions/:id/stream", (req, res) => {
   const pollVerdict = async () => {
     try {
       const result = await pool.query(
-        "SELECT status, verdict, passed_tests, total_tests, created_at FROM submissions WHERE id = $1",
+        "SELECT user_id, status, verdict, passed_tests, total_tests, created_at FROM submissions WHERE id = $1",
         [submissionId]
       );
 
       if (result.rows[0]) {
-        res.write(`data: ${JSON.stringify(result.rows[0])}\n\n`);
+        const { user_id: ownerId, ...verdict } = result.rows[0];
+        // A signed-in user's submission can only be watched by that user.
+        if (ownerId !== null && ownerId !== viewer?.id) {
+          res.write(`data: ${JSON.stringify({ error: "Not your submission" })}\n\n`);
+          if (interval) clearInterval(interval);
+          return res.end();
+        }
+        res.write(`data: ${JSON.stringify(verdict)}\n\n`);
 
         // Stop polling when submission reaches terminal state
         const terminalStatuses = ["completed", "failed", "rejected"];

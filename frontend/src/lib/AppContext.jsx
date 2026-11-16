@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, currentUserParam } from '../api.js';
-import { getUser, load, save } from './storage.js';
+import { api } from '../api.js';
+import { getUser, load, save, setUser } from './storage.js';
 import { AppContext } from './useApp.js';
 
 const EMPTY_STATS = {
@@ -36,9 +36,17 @@ export function AppProvider({ children }) {
     };
   }, []);
 
+  // The session cookie is the source of truth. The copy in localStorage only avoids a
+  // flash of "signed out" while this check runs; an expired session clears it.
+  useEffect(() => {
+    api.get('/auth/me')
+      .then(response => setUser(response.data.user || null))
+      .catch(() => { /* API unreachable: keep the cached state until it's back */ });
+  }, []);
+
   const refreshStats = useCallback(async () => {
     try {
-      const response = await api.get(`/stats?userId=${encodeURIComponent(currentUserParam())}`);
+      const response = await api.get('/stats');
       setStats(response.data);
       return response.data;
     } catch {

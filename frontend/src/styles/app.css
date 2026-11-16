@@ -366,6 +366,9 @@
 .input-icon .field { min-height: 46px; padding-left: 40px; }
 .reveal-button { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 9px; background: none; color: var(--text-subtle); }
 .reveal-button:hover { color: var(--text); background: var(--surface-hover); }
+.google-button { display: flex; justify-content: center; min-height: 44px; }
+.auth-divider { display: flex; align-items: center; gap: 12px; margin: 18px 0; color: var(--text-subtle); font-size: 12px; }
+.auth-divider::before, .auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 .auth-foot { margin: 18px 0 0; color: var(--text-muted); font-size: 14px; text-align: center; }
 
 /* ── Workspace ──────────────────────────────────────────────── */

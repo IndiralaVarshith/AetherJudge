@@ -8,6 +8,21 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Case-insensitive uniqueness for logins ("Ana" and "ana" are the same account).
+-- Skipped with a notice if existing rows already clash, so startup never fails.
+DO $$
+BEGIN
+  CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_uq ON users (lower(username));
+  CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_uq ON users (lower(email));
+EXCEPTION WHEN unique_violation THEN
+  RAISE NOTICE 'Existing users clash case-insensitively; case-insensitive unique indexes not created';
+END $$;
+
+-- Google sign-in: the Google account id, and no password for Google-only accounts.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT;
+ALTER TABLE users ALTER COLUMN password DROP NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS users_google_id_uq ON users (google_id) WHERE google_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS problems (
     id SERIAL PRIMARY KEY,
     title VARCHAR(255) NOT NULL,

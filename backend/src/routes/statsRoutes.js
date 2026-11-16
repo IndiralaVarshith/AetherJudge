@@ -2,15 +2,15 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../db");
 const { ALBUMS } = require("../albums");
+const { optionalAuth } = require("../middleware/auth");
 
 const XP = { easy: 10, medium: 25, hard: 50 };
 const XP_SQL = "CASE p.difficulty WHEN 'easy' THEN 10 WHEN 'medium' THEN 25 ELSE 50 END";
 
-// Same convention as /submissions/history: no user id means the shared guest account.
+// Stats always belong to the session's user. Guests match nothing, so they see zeros
+// (guest progress is not stored; signing up is what saves it).
 function userFilter(req) {
-  const raw = req.query.userId;
-  const id = parseInt(raw, 10);
-  return Number.isInteger(id) ? { sql: "s.user_id = $1", params: [id] } : { sql: "s.user_id IS NULL AND $1::int IS NULL", params: [null] };
+  return req.user ? { sql: "s.user_id = $1", params: [req.user.id] } : { sql: "FALSE AND $1::int IS NULL", params: [null] };
 }
 
 const dayKey = date => date.toISOString().slice(0, 10);
@@ -43,7 +43,7 @@ function longestStreak(acceptedDays) {
 }
 
 // GET /api/stats?userId=7 → everything the profile, navbar and progress rings need
-router.get("/stats", async (req, res) => {
+router.get("/stats", optionalAuth, async (req, res) => {
   try {
     const filter = userFilter(req);
     const [solvedRows, totals, albumTotals, activity, recent, counts] = await Promise.all([
