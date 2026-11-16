@@ -68,6 +68,12 @@ ALTER TABLE problems ADD COLUMN IF NOT EXISTS duplicate_of INTEGER REFERENCES pr
 ALTER TABLE problems ADD COLUMN IF NOT EXISTS similarity REAL;
 ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS pair_hash CHAR(64);  -- fingerprint of one (input, output) pair
 
+-- Albums (topic collections). `albums` = every album a problem appears in,
+-- `album` = the one it is ordered under. Rules live in backend/src/albums.js.
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS albums TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE problems ADD COLUMN IF NOT EXISTS album TEXT;
+CREATE INDEX IF NOT EXISTS problems_album_idx ON problems (album);
+
 -- Layer 1: one row per (source, source_id). Layer 2: one row per statement fingerprint.
 CREATE UNIQUE INDEX IF NOT EXISTS problems_source_uq ON problems (source, source_id) WHERE source_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS problems_text_hash_uq ON problems (text_hash) WHERE text_hash IS NOT NULL;

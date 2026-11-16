@@ -1,14 +1,15 @@
 const axios = require("axios");
 const { JUDGE0_URL } = require("./config"); // ✅ Load from config
 
-async function submitToJudge0(code, language_id, stdin = "") {
+async function submitToJudge0(code, language_id, stdin = "", compilerOptions = null) {
   const response = await axios.post(
     `${JUDGE0_URL}/submissions?base64_encoded=false&wait=false`,
     {
       source_code: code,
       language_id: language_id,
-      stdin: stdin, // ✅ Use the passed stdin value
-      cpu_time_limit: 5
+      stdin: stdin,
+      cpu_time_limit: 5,
+      ...(compilerOptions ? { compiler_options: compilerOptions } : {})
     }
   );
   return response.data.token;

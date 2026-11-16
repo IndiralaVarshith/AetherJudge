@@ -2,16 +2,19 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../db");
 const { addProblem } = require("../../importers/store");
+const { SLUGS, ORDER_IN_ALBUM } = require("../albums");
 
 // Columns that are safe to show to users (fingerprints and review data stay server-side).
-const PUBLIC_COLUMNS = "id, slug, title, difficulty, time_limit, memory_limit, tags, source, source_url, license";
+const PUBLIC_COLUMNS = "id, slug, title, difficulty, time_limit, memory_limit, tags, album, albums, source, source_url, license";
 
-// GET /api/problems → List published problems
-// Optional filters: ?difficulty=easy&tag=sorting&q=search+text&limit=50&offset=0
+// GET /api/problems → List published problems in learning order:
+// album by album (see src/albums.js), easy before hard inside each album.
+// Optional filters: ?album=strings&difficulty=easy&tag=sorting&q=search+text&limit=50&offset=0
 router.get("/", async (req, res) => {
   try {
     const where = ["status = 'published'"];
-    const params = [];
+    const params = [SLUGS];
+    if (req.query.album) { params.push(String(req.query.album).toLowerCase()); where.push(`$${params.length} = ANY(albums)`); }
     if (req.query.difficulty) { params.push(String(req.query.difficulty).toLowerCase()); where.push(`difficulty = $${params.length}`); }
     if (req.query.tag) { params.push(String(req.query.tag).toLowerCase()); where.push(`$${params.length} = ANY(tags)`); }
     if (req.query.q) { params.push(`%${String(req.query.q)}%`); where.push(`title ILIKE $${params.length}`); }
@@ -25,7 +28,13 @@ router.get("/", async (req, res) => {
       if (Number.isInteger(offset) && offset > 0) { params.push(offset); paging += ` OFFSET $${params.length}`; }
     }
 
-    const result = await pool.query(`SELECT ${PUBLIC_COLUMNS} FROM problems WHERE ${where.join(" AND ")} ORDER BY id${paging}`, params);
+    // When filtering to one album, its own problems come before ones that only also belong to it.
+    const albumFirst = req.query.album ? "CASE WHEN album = $2 THEN 0 ELSE 1 END, " : "";
+    const result = await pool.query(
+      `SELECT ${PUBLIC_COLUMNS} FROM problems WHERE ${where.join(" AND ")}
+        ORDER BY ${albumFirst}COALESCE(array_position($1::text[], album), 999), ${ORDER_IN_ALBUM}${paging}`,
+      params
+    );
     res.json(result.rows);
   } catch (err) {
     console.error("List problems error:", err.message);

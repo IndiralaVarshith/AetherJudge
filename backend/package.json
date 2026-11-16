@@ -9,6 +9,8 @@
     "worker": "node redisQueue/worker.js",
     "import:taco": "node importers/taco.js",
     "import:exercism": "node importers/exercism.js",
+    "albums": "node src/albums.js",
+    "fix:titles": "node importers/fix-titles.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

@@ -58,6 +58,12 @@ function flattenCases(node, out = []) {
 
 const isScalar = value => ["number", "string", "boolean"].includes(typeof value);
 
+// JSON numbers above 2^53 lose precision in JavaScript and print as "1.8e+32", which no
+// program can match. Tests containing them are left out.
+const hasUnsafeNumber = value =>
+  (typeof value === "number" && Number.isInteger(value) && !Number.isSafeInteger(value)) ||
+  (Array.isArray(value) && value.some(hasUnsafeNumber));
+
 // Returns the text for one value, or null when it cannot be written on a single line.
 function encode(value, { insideList = false } = {}) {
   if (typeof value === "boolean") return value ? "true" : "false";
@@ -106,6 +112,7 @@ function convert(slug, canonical, instructions, title, maxTests = 20) {
 
   const tests = [];
   for (const testCase of cases) {
+    if (keys.some(key => hasUnsafeNumber(testCase.input[key])) || hasUnsafeNumber(testCase.expected)) continue;
     const lines = keys.map(key => encode(testCase.input[key]));
     const expected = Array.isArray(testCase.expected)
       ? (testCase.expected.every(isScalar) ? testCase.expected.map(item => encode(item, { insideList: typeof item !== "string" })) : [null])

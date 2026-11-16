@@ -54,35 +54,65 @@ flowchart TD
 
 ---
 
+## ✨ Features
+
+- **Problem library:** 1,000+ problems imported from open datasets, with no duplicates (see [Importing Problems](#-importing-problems)).
+- **Albums:** 12 topic collections (Basics, Math, Strings, Arrays, Sorting & Searching, Greedy, Data Structures, Bit Manipulation, Dynamic Programming, Graphs, Trees, Game Theory), listed in learning order, easy → hard inside each.
+- **Guide me:** a 132-step path through all 12 albums, with progress and a "continue" button.
+- **Workspace:** Monaco editor, resizable panes, statements rendered with Markdown and LaTeX maths, run with custom input, submit with live test-by-test verdicts.
+  - Code autosaves per problem and language; private notes and bookmarks per problem.
+  - Timer, Zen mode (`Alt Z`), font size, reset to starter code, previous / next / random problem.
+  - Shortcuts: `⌥ ↵` run, `⌘ ↵` (Ctrl ↵) submit, `⌘ K` (Ctrl K) search anything.
+- **Motivation:** XP (easy +10, medium +25, hard +50), levels, daily streaks, confetti on accepted solutions, a daily problem, a leaderboard and a profile page with an activity heatmap.
+- **Accounts:** sign up / sign in. Without an account you practise as a guest.
+- **Dark and light themes**, works on phones.
+
+---
+
 ## 💻 Technology Stack
 
 | Layer | Technology | Purpose |
 | :--- | :--- | :--- |
-| **Frontend** | React 19, Vite, Monaco Editor | High-performance interactive IDE & UI |
-| **Hosting (Frontend)**| Vercel (Hobby Free Tier) | Global CDN edge hosting, free SSL, zero maintenance |
-| **Backend API** | Node.js, Express.js 5 | RESTful API, authentication & SSE streaming |
-| **Message Broker** | Redis 7 (Alpine) | Job queue (`code_submission_queue`) |
-| **Worker Layer** | Node.js Daemon | Background test-case evaluation & auto-recovery |
-| **Code Execution** | Judge0 Community Edition (Docker) | Isolated, sandboxed compilation & execution (Python, C++, Java) |
-| **Primary Database** | PostgreSQL 16 (Alpine) | Persistent users, problems, test cases, verdicts |
-| **Reverse Proxy** | Nginx (Alpine) | SSL termination, reverse proxy, SSE buffer handling |
+| **Frontend** | React 19, Vite, Monaco Editor | App and code editor |
+| **UI libraries** | Motion, cmdk, Sonner, canvas-confetti, react-markdown + KaTeX, react-resizable-panels, Lucide icons | Animation, ⌘K palette, toasts, celebrations, statement rendering, resizable panes, icons |
+| **Hosting (Frontend)**| Vercel (Hobby Free Tier) | Global CDN, free SSL |
+| **Backend API** | Node.js, Express.js 5 | REST API, authentication, live verdicts (SSE) |
+| **Message Broker** | Redis 7 | Submission queue (`code_submission_queue`) |
+| **Worker** | Node.js | Runs each submission against every test case |
+| **Code Execution** | Judge0 Community Edition 1.13.1 (Docker) | Sandboxed compile and run |
+| **Database** | PostgreSQL 16 | Users, problems, test cases, submissions |
+| **Reverse Proxy** | Nginx | Production only: SSL, proxy, SSE buffering |
 
 ---
 
-## 🔒 Security & Sandboxing Model
+## 🧑‍💻 Languages & Compiler Versions
 
-1. **Sandboxed Code Execution**: Untrusted user code is **never** executed inside the API process or host OS. Execution occurs exclusively inside isolated Linux namespaces and cgroups managed by Judge0.
-2. **Network Isolation**: PostgreSQL, Redis, and Judge0 internal APIs are strictly bound to the internal Docker network (`aether_internal`). Only Nginx (`:80`/`:443`) is exposed publicly.
-3. **Defense Against Denial of Service**: CPU time limits (5s default) and memory constraints prevent infinite loops and memory exhaustion.
-4. **Credential Safety**: All environment secrets and database passwords are injected at runtime via environment variables and never checked into source control.
+Code runs inside **Judge0**, which compiles and executes it in an isolated sandbox. The versions are fixed by the Judge0 image:
+
+| Language in the editor | Compiler / runtime | Judge0 language id | Extra flags |
+| :--- | :--- | :--- | :--- |
+| Python 3.8 | Python 3.8.1 | 71 | – |
+| C (C17) | GCC 9.2.0 | 50 | `-std=c17 -O2` |
+| C++17 | GCC 9.2.0 | 54 | `-std=c++17 -O2` |
+| Java 13 | OpenJDK 13.0.1 | 62 | – |
+
+- The mapping lives in [backend/src/languages.js](backend/src/languages.js). `GET /api/languages` returns it, and `GET http://localhost:2358/languages` lists everything Judge0 can run.
+- Programs read from **standard input** and print to **standard output**. Starter code is beginner-friendly (`input()` in Python, `scanf` in C, `cin` in C++, `Scanner` in Java).
+- Java code must use `public class Main`.
+
+**Why Judge0, and is there something newer?** Judge0 CE is free, open source, sandboxed and handles test cases and limits for us. Its last release (1.13.1, April 2024) still ships 2019–2020 compilers. The main free alternative, [Piston](https://github.com/engineer-man/piston), offers Python 3.12, GCC 10.2 and Java 15. That is only modestly newer and it would mean rewriting the worker, so we stay on Judge0 for now.
 
 ---
 
 ## 🚀 Quickstart: Local Development
 
 ### Prerequisites
-- Node.js (v18+)
-- Docker & Docker Desktop
+- **Node.js 18+** (developed on Node 24)
+- **Docker Desktop**, running
+- About 3 GB of free disk for the Docker images
+
+> [!NOTE]
+> On Apple Silicon Macs, Judge0 runs through emulation (its image is x86-only). Docker prints a "platform (linux/amd64) does not match" warning, which is expected. Judging is slower than on a real x86 server.
 
 ### 1. Clone the repository
 ```bash
@@ -90,49 +120,91 @@ git clone https://github.com/IndiralaVarshith/AetherJudge.git
 cd AetherJudge
 ```
 
-### 2. Start Core Infrastructure (Docker)
-Start PostgreSQL, Redis, and Judge0:
+### 2. Start PostgreSQL and Redis (Docker)
+First time only, create the two containers (they restart with Docker afterwards):
 ```bash
-# Start Judge0
+docker run -d --name aether-postgres --restart unless-stopped -p 127.0.0.1:5433:5432 \
+  -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=admin123 -e POSTGRES_DB=aetherjudge \
+  -v aether_pgdata_dev:/var/lib/postgresql/data postgres:16-alpine
+docker run -d --name aether-redis --restart unless-stopped -p 127.0.0.1:6380:6379 redis:7-alpine
+```
+Later, if they are stopped:
+```bash
+docker start aether-postgres aether-redis
+```
+The values above match `backend/.env.example`. If you change them, change both.
+
+### 3. Start Judge0
+```bash
 cd judge0
 docker compose up -d
 cd ..
-
-# Start Local Postgres & Redis (or use existing containers)
-docker start aether-postgres aether-redis
+curl http://localhost:2358/about   # should print Judge0's version after ~30 s
 ```
 
-### 3. Start Backend API & Worker
+### 4. Start the backend API and worker
 ```bash
 cd backend
+cp .env.example .env     # first time only; then set JWT_SECRET and ADMIN_SECRET
 npm install
-npm run dev      # Starts Express on http://localhost:5000
-# In a second terminal:
-npm run worker   # Starts queue worker daemon
+npm run dev              # API on http://localhost:5000 (creates/updates the database tables)
+```
+In a **second terminal**:
+```bash
+cd backend
+npm run worker           # judges queued submissions
 ```
 
-### 4. Start Frontend
+### 5. Load problems (first time only)
+In a third terminal, from `backend/`:
+```bash
+npm run import:exercism
+npm run import:taco -- --easy 200 --medium 200 --hard 100
+```
+See [Importing Problems](#-importing-problems) for details. Without this step the site only has the 8 starter problems.
+
+### 6. Start the frontend
 ```bash
 cd frontend
+echo "VITE_API_BASE=http://localhost:5000/api" > .env.development   # first time only
 npm install
-npm run dev      # Starts Vite dev server on http://localhost:5173
+npm run dev              # http://localhost:5173
 ```
+Open **http://localhost:5173**.
 
-Visit **http://localhost:5173** in your browser.
+> [!IMPORTANT]
+> Every `npm` command must be run inside `backend/` or `frontend/`. Running it from the project root fails with "Could not read package.json".
+
+### Useful backend scripts
+
+| Command (in `backend/`) | What it does |
+| :--- | :--- |
+| `npm run dev` | Start the API |
+| `npm run worker` | Start the submission worker |
+| `npm run import:taco -- --easy N --medium N --hard N` | Add problems from the TACO dataset |
+| `npm run import:exercism` | Add problems from Exercism |
+| `npm run fix:titles` | Replace code-style titles ("Codeforces 1539C") with real names. Add `-- --deep` to also query individual Codeforces contests (a few MB each) |
+| `npm run albums` | Re-sort every problem into albums after editing `src/albums.js` |
+| `node importers/fix-unsafe-numbers.js` | One-off repair for Exercism tests imported before huge numbers were skipped |
 
 ---
 
 ## 📚 Importing Problems
 
-Problems come from open datasets and are imported with scripts in `backend/importers/`. Both are safe to re-run: anything already in the database is skipped.
+Problems come from open datasets and are imported with scripts in `backend/importers/`. Both importers are safe to re-run: anything already in the database is skipped.
 
 ```bash
 cd backend
-npm run import:taco -- --easy 200 --medium 200 --hard 100   # TACO dataset (Apache-2.0)
+npm run import:taco -- --easy 200 --medium 200 --hard 100   # TACO dataset (Apache-2.0), ~25,000 problems available
 npm run import:exercism                                     # Exercism problem-specifications (MIT)
 ```
 
 Add `--dry-run` to either command to see what would be added without saving anything.
+
+- **TACO** downloads its data from Hugging Face in blocks of 1,000 problems (40–130 MB each) and stops once the requested numbers are reached. Each run adds that many *new* problems.
+- **Titles:** many TACO problems have no name, so they start as codes like "Codeforces 1539C". After each import the importer looks up the real names from the official Codeforces API and the AtCoder Problems dataset. Kattis and CodeChef problems keep their codes for now.
+- **Albums:** new problems are sorted into albums automatically, from their tags or, when they have none, from words in their title and statement.
+- **Exercism** only imports exercises that convert cleanly to input/output problems (about 48 of 135), and skips tests with numbers too large for JavaScript.
 
 **No duplicates.** Every problem, whatever its source (including ones created through `POST /api/problems`), passes four checks before it is published:
 
@@ -217,45 +289,54 @@ The script automatically:
 
 ## ⚙️ Environment Variables Reference
 
-### Frontend (`frontend/.env`)
+### Frontend (`frontend/.env.development` locally, hosting settings in production)
 | Variable | Description | Example |
 | :--- | :--- | :--- |
-| `VITE_API_BASE` | Public URL to backend `/api` endpoint | `https://api.yourdomain.com/api` |
+| `VITE_API_BASE` | URL of the backend `/api` endpoint | Local: `http://localhost:5000/api` · Production: `https://api.yourdomain.com/api` |
 
 ### Backend (`backend/.env` / `.env.production`)
 | Variable | Description | Example |
 | :--- | :--- | :--- |
-| `NODE_ENV` | Environment mode | `production` |
+| `NODE_ENV` | Environment mode | `development` / `production` |
 | `PORT` | API listening port | `5000` |
-| `CLIENT_ORIGIN` | Allowed frontend origin for CORS | `https://aetherjudge.vercel.app` |
-| `DB_HOST` | PostgreSQL hostname | `postgres` |
-| `DB_PORT` | PostgreSQL port | `5432` |
+| `CLIENT_ORIGIN` | Allowed frontend origin for CORS | `http://localhost:5173` |
+| `DB_HOST` | PostgreSQL hostname | `localhost` (local) · `postgres` (Docker) |
+| `DB_PORT` | PostgreSQL port | `5433` (local) · `5432` (Docker) |
 | `DB_USER` | Database user | `admin` |
-| `DB_PASSWORD` | Database password | `strong_db_password` |
+| `DB_PASSWORD` | Database password | `admin123` (local only) |
 | `DB_NAME` | Database name | `aetherjudge` |
-| `REDIS_URL` | Redis connection URL | `redis://redis:6379` |
-| `JUDGE0_URL` | Judge0 server internal URL | `http://judge0-server:2358` |
-| `JWT_SECRET` | Secret key for JWT signing | `random_secure_hex_key` |
+| `REDIS_URL` | Redis connection URL | `redis://127.0.0.1:6380` |
+| `JUDGE0_URL` | Judge0 server URL | `http://localhost:2358` |
+| `JWT_SECRET` | Secret key for signing login tokens | any long random string |
+| `ADMIN_SECRET` | Required in the `x-admin-secret` header to create problems via `POST /api/problems` | any long random string |
 
 ---
 
 ## 🔍 Verification & Troubleshooting
 
-### Check Service Health
+### Check service health
 ```bash
-# Check backend health
-curl http://localhost/health
-
-# Check Judge0 API
-curl http://localhost:2358/about
-
-# View container logs
-docker compose -f docker-compose.prod.yml logs -f api
-docker compose -f docker-compose.prod.yml logs -f worker
+curl http://localhost:5000/health          # API (local)
+curl http://localhost:2358/about           # Judge0
+curl http://localhost:5000/api/languages   # languages the judge accepts
+docker ps                                  # containers
 ```
 
-### Restart or Update Stack
+### Common problems
+
+| Symptom | Cause | Fix |
+| :--- | :--- | :--- |
+| Site says **"Could not reach AetherJudge. Is the API running?"** | API not running, or stuck waiting for the database | Start it with `npm run dev` in `backend/`. If it hangs, see the next row |
+| API starts but never prints "Server running" | Postgres/Redis containers show "Up" but lost their port mappings (seen after Docker Desktop restarts) | `docker restart aether-postgres aether-redis`, then restart the API and worker |
+| `npm` error **"Could not read package.json"** | Command run from the wrong folder | `cd backend` or `cd frontend` first |
+| `docker compose up` in `judge0/`: **"mounts denied … is not shared from the host"** | Terminal path spelled `/users/...` instead of `/Users/...` | Open a new terminal, `cd /Users/<you>/.../AetherJudge/judge0`, run it again |
+| Submissions stay on "In the queue…" | Worker not running | `npm run worker` in `backend/` |
+| Judging is slow | Judge0 runs under emulation on Apple Silicon | Expected locally; x86 servers are much faster |
+
+### Production (Docker Compose)
 ```bash
-git pull origin main
-docker compose -f docker-compose.prod.yml up -d --build
+curl http://localhost/health
+docker compose -f docker-compose.prod.yml logs -f api
+docker compose -f docker-compose.prod.yml logs -f worker
+git pull origin main && docker compose -f docker-compose.prod.yml up -d --build
 ```

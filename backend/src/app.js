@@ -6,6 +6,8 @@ const submitRoutes = require("./routes/submitRoutes");
 const cookieParser = require("cookie-parser");
 const authRoutes = require("./routes/authRoutes");
 const problemRoutes = require("./routes/problemRoutes");
+const albumRoutes = require("./routes/albumRoutes");
+const statsRoutes = require("./routes/statsRoutes");
 const pool = require("./db"); // ✅ Ensure this matches your db.js export
 
 const app = express();
@@ -35,6 +37,8 @@ app.get("/health", (req, res) => res.json({ status: "ok" }));
 app.use("/api/auth", authRoutes);
 app.use("/api", submitRoutes);
 app.use("/api/problems", problemRoutes);
+app.use("/api", albumRoutes); // /api/albums and /api/guide
+app.use("/api", statsRoutes); // /api/stats, /api/leaderboard and /api/daily
 
 // ✅ Server-Sent Events endpoint for real-time verdict streaming
 app.get("/api/submissions/:id/stream", (req, res) => {

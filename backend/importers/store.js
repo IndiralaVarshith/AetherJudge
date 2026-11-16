@@ -15,6 +15,7 @@ const fs = require("fs");
 const path = require("path");
 const pool = require("../src/db");
 const { normalizeText, normalizeIO, textHash, pairHash, testsHash, slugify } = require("./normalize");
+const { assignAlbums } = require("../src/albums");
 
 const DEFAULTS = {
   reviewSimilarity: 0.6, // wording at least this similar → hold for review
@@ -227,6 +228,8 @@ async function runImport({ name, dryRun = false, options = {} }, produce) {
     };
 
     await produce(add, stats);
+    const sorted = await assignAlbums(client);
+    if (sorted) console.log(`📚 Sorted ${sorted} new problem(s) into albums`);
     await client.query(dryRun ? "ROLLBACK" : "COMMIT");
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
@@ -252,6 +255,7 @@ async function addProblem(problem, options = {}) {
     const hasTrgm = (await client.query("SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'")).rowCount > 0;
     if (hasTrgm) await client.query("SELECT set_config('pg_trgm.similarity_threshold', $1, true)", [String(options.reviewSimilarity || DEFAULTS.reviewSimilarity)]);
     const result = await importProblem(client, problem, { ...options, hasTrgm, allowUpgrade: false });
+    if (result.action === "inserted" || result.action === "review") await assignAlbums(client);
     await client.query("COMMIT");
     return result;
   } catch (err) {

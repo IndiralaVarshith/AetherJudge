@@ -53,7 +53,8 @@ async function processJob(job) {
           const token = await submitToJudge0(
             job.code,
             job.language_id,
-            tc.input
+            tc.input,
+            job.compiler_options
           );
 
           result = await getResult(token);

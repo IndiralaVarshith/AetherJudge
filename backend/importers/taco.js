@@ -20,6 +20,7 @@
 require("dotenv").config();
 const { runImport, parseArgs, explainError, pool } = require("./store");
 const { sha256 } = require("./normalize");
+const { fixTitles } = require("./fix-titles");
 
 const DATASET = "https://huggingface.co/datasets/BAAI/TACO/resolve/main/ALL";
 const SHARDS = 9;
@@ -158,6 +159,12 @@ async function main() {
     }
   });
   console.log(`   left out before dedup: ${JSON.stringify(filtered)}`);
+
+  // Replace "Codeforces 1539C"-style titles with real names from public lists.
+  if (!args["dry-run"]) {
+    const titles = await fixTitles();
+    console.log(`🏷️  Real names found for ${titles.renamed} of ${titles.checked} code-style title(s)`);
+  }
 }
 
 if (require.main === module) {
