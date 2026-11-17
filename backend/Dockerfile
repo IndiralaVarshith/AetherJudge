@@ -30,8 +30,8 @@ COPY . .
 USER appuser
 
 # 🏥 Health check: Cloud platforms use this to know if app is alive
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "require('http').get('http://127.0.0.1:5000/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })"
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:5000/health || exit 1
 
 # Default command (will be overridden per service in docker-compose)
 CMD ["node", "src/app.js"]
