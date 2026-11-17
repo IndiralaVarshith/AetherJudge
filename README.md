@@ -317,6 +317,7 @@ Browser ──► https://<your-site>.vercel.app ──(/api/*)──► https:/
    - **Region:** `us-central1`, `us-west1` or `us-east1`. Only these three are free; any zone inside them is fine.
    - **Machine:** series **E2**, type **e2-micro** (2 shared vCPUs, 1 GB RAM). It's x86, which Judge0 needs.
    - **Boot disk → Change:** **Ubuntu 22.04 LTS (x86/64)**, disk type **Standard persistent disk**, size **30 GB**. (SSD/"balanced" disks are not free.)
+     **Not 24.04:** Google's Ubuntu 24.04 kernel has no cgroup v1 memory controller, which Judge0 1.13 needs to sandbox code, so every submission would fail. `deploy.sh` checks this and stops.
    - **Firewall:** tick **Allow HTTP traffic** and **Allow HTTPS traffic**.
    - Create. The monthly price shown on this page is before the free tier; the free tier is applied on your bill.
 4. Connect: on the VM list, click **SSH** next to your VM. A terminal opens in your browser, so you don't need SSH keys.
@@ -335,7 +336,7 @@ git checkout varshith-1        # or main, once merged
 ```
 
 [deploy.sh](deploy.sh) is safe to re-run. It:
-1. checks the VM is x86_64;
+1. checks the VM is x86_64 and its kernel supports Judge0's sandbox (Ubuntu 22.04 does; Google's 24.04 doesn't);
 2. switches the kernel to cgroup v1, which Judge0 1.13 needs. **The first run stops here and asks you to `sudo reboot`; reconnect and run `./deploy.sh` again**;
 3. adds 4 GB of swap (the VM has 1 GB RAM);
 4. installs Docker;
@@ -471,6 +472,7 @@ docker ps                                  # containers
 | Website loads but shows "Could not reach AetherJudge" | `frontend/vercel.json` still says `YOUR-API-DOMAIN`, or points to the wrong domain. Fix, push, and let Vercel redeploy |
 | Google button missing or "origin not allowed" | Set `GOOGLE_CLIENT_ID` in `.env.production` and restart; add the Vercel URL to the OAuth client's Authorized JavaScript origins |
 | Every submission says "runtime error" | Judge0 sandbox problem, usually cgroup v2. On the VM, `stat -fc %T /sys/fs/cgroup` must print `tmpfs`, not `cgroup2fs` |
+| `deploy.sh` says the kernel has no cgroup v1 memory controller | The VM runs Ubuntu 24.04 (or another new kernel). Delete it and create it again with **Ubuntu 22.04 LTS** |
 | Out of memory, containers restarting | Check that the swap exists (`swapon --show`); use a VM with more RAM if it keeps happening |
 
 ```bash

@@ -1,12 +1,13 @@
 #!/bin/bash
 # ==============================================================================
 # AetherJudge production deploy for a free x86 VM (Google Cloud Always Free
-# e2-micro, or any Ubuntu 22.04/24.04 x86_64 server).
+# e2-micro, or any Ubuntu 22.04 x86_64 server with a kernel that has cgroup v1).
 #
 #   ./deploy.sh            first install, and later updates (safe to re-run)
 #
 # What it does:
-#   1. Checks the machine is x86_64 (the Judge0 image is x86-only).
+#   1. Checks the machine is x86_64 (the Judge0 image is x86-only) and that its
+#      kernel still supports what Judge0's sandbox needs.
 #   2. Switches the kernel to cgroup v1 if needed (Judge0 1.13 requires it) and
 #      asks you to reboot once.
 #   3. Adds 4 GB of swap (free VMs have 1 GB RAM).
@@ -33,6 +34,16 @@ if [ "$ARCH" != "x86_64" ]; then
 fi
 ok "x86_64"
 
+# Judge0 1.13 limits memory with the old cgroup v1 memory controller. Newer kernels
+# (e.g. Ubuntu 24.04 on Google Cloud, kernel 6.11+) can be built without it, and then
+# every submission fails. Ubuntu 22.04 (kernel 6.8) still has it.
+KCONFIG="/boot/config-$(uname -r)"
+if [ -f "$KCONFIG" ] && grep -q '^# CONFIG_MEMCG_V1 is not set' "$KCONFIG"; then
+  echo "  This kernel ($(uname -r)) has no cgroup v1 memory controller (CONFIG_MEMCG_V1),"
+  echo "  so Judge0 cannot run code here. Recreate the VM with Ubuntu 22.04 LTS (x86/64)."
+  exit 1
+fi
+
 # ── 2. cgroup v1 for Judge0 ──────────────────────────────────────────────────
 if [ "$(stat -fc %T /sys/fs/cgroup)" = "cgroup2fs" ]; then
   say "Switching to cgroup v1 (Judge0 1.13 sandboxing needs it)"
@@ -50,7 +61,12 @@ if [ "$(stat -fc %T /sys/fs/cgroup)" = "cgroup2fs" ]; then
   echo "    sudo reboot"
   exit 0
 fi
-ok "cgroup v1"
+if ! grep -q '^memory' /proc/cgroups; then
+  echo "  cgroup v1 is on, but the kernel has no memory controller, so Judge0 cannot run code."
+  echo "  Recreate the VM with Ubuntu 22.04 LTS (x86/64)."
+  exit 1
+fi
+ok "cgroup v1 with memory controller"
 
 # ── 3. Swap ──────────────────────────────────────────────────────────────────
 if [ ! -f /swapfile ]; then
