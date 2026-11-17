@@ -124,9 +124,19 @@ for required in API_DOMAIN DB_PASSWORD JWT_SECRET; do
 done
 
 # ── 7. Start ─────────────────────────────────────────────────────────────────
-say "Building and starting AetherJudge (first run takes a few minutes)"
 COMPOSE="$DOCKER compose --env-file .env.production -f docker-compose.prod.yml"
-$COMPOSE up -d --build --remove-orphans
+say "Building the backend image (first run takes a few minutes)"
+# The free VM has 1 GB of RAM. Pause the heavy containers while building, and build
+# the image once with plain docker build (the API and the worker share it).
+$DOCKER stop judge0-worker judge0-server aether-worker aether-api >/dev/null 2>&1 || true
+if ! $DOCKER build -t aetherjudge-backend:latest ./backend; then
+  warn "Build failed, retrying once"
+  $DOCKER build -t aetherjudge-backend:latest ./backend
+fi
+$DOCKER image prune -f >/dev/null 2>&1 || true # drop the old image layers
+
+say "Starting AetherJudge"
+$COMPOSE up -d --no-build --remove-orphans
 
 say "Waiting for https://$API_DOMAIN/health"
 for i in $(seq 1 40); do

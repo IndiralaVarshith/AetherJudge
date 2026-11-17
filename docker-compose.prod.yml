@@ -99,6 +99,9 @@ services:
   # AetherJudge Backend API (Express.js)
   # ─────────────────────────────────────────────────────────────
   api:
+    # Built once by deploy.sh (docker build -t aetherjudge-backend ./backend) and
+    # shared with the worker, so the small VM never builds it twice.
+    image: aetherjudge-backend:latest
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -145,9 +148,8 @@ services:
   # AetherJudge Queue Worker (Node.js Background Daemon)
   # ─────────────────────────────────────────────────────────────
   worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: aetherjudge-backend:latest # same image as the api
+    pull_policy: never
     container_name: aether-worker
     command: ["node", "redisQueue/worker.js"]
     restart: unless-stopped
