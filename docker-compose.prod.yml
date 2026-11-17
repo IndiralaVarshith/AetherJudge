@@ -115,7 +115,16 @@ services:
       REDIS_URL: redis://redis:6379
       JUDGE0_URL: http://judge0-server:2358
       JWT_SECRET: ${JWT_SECRET}
+      ADMIN_SECRET: ${ADMIN_SECRET}
       CLIENT_ORIGIN: ${CLIENT_ORIGIN}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      # The browser talks to the Vercel site, which forwards /api here, so the session
+      # cookie is first-party: Lax + Secure works everywhere (including Safari/iOS).
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+      COOKIE_SECURE: "true"
+      # Proxies in front of the API: Caddy, plus Vercel's forwarding. Used to find the
+      # visitor's real IP for rate limits.
+      TRUST_PROXY: ${TRUST_PROXY:-2}
     depends_on:
       postgres:
         condition: service_healthy
@@ -163,16 +172,22 @@ services:
       - aether_internal
 
   # ─────────────────────────────────────────────────────────────
-  # Nginx Reverse Proxy (Public Entry Point)
+  # Caddy Reverse Proxy (public entry point, automatic free HTTPS)
+  # Gets and renews a Let's Encrypt certificate for API_DOMAIN by itself.
   # ─────────────────────────────────────────────────────────────
-  nginx:
-    image: nginx:alpine
-    container_name: aether-nginx
+  caddy:
+    image: caddy:2-alpine
+    container_name: aether-caddy
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
+    environment:
+      API_DOMAIN: ${API_DOMAIN}
     volumes:
-      - ./backend/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
     depends_on:
       api:
         condition: service_healthy
@@ -183,6 +198,8 @@ volumes:
   aether_pgdata:
   aether_redisdata:
   judge0_pgdata:
+  caddy_data:
+  caddy_config:
 
 networks:
   aether_internal:

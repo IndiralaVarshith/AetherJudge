@@ -12,8 +12,10 @@ const pool = require("./db"); // ✅ Ensure this matches your db.js export
 const { sessionUser } = require("./middleware/auth");
 
 const app = express();
-// Behind Nginx in production: use the client's real IP (for rate limits), not Nginx's.
-if (process.env.NODE_ENV === "production") app.set("trust proxy", 1);
+// Behind proxies in production (Caddy, and Vercel forwarding /api): trust that many hops
+// so req.ip is the visitor's real IP, which the rate limits rely on.
+const trustProxy = parseInt(process.env.TRUST_PROXY ?? (process.env.NODE_ENV === "production" ? "1" : "0"), 10);
+if (trustProxy > 0) app.set("trust proxy", trustProxy);
 
 // ✅ Dynamic CORS for deployed frontend (Vercel) + local dev
 const allowedOrigins = [

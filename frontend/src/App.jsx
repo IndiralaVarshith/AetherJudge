@@ -241,32 +241,57 @@ export default function Workspace() {
     const submittedProblem = problem;
     try {
       const response = await api.post('/submit', { code, language, problemId: problem.id });
-      const source = new EventSource(`${API_BASE}/submissions/${response.data.submissionId}/stream`, { withCredentials: true });
+      const { submissionId } = response.data;
+      let finished = false;
+
+      // Handles one update, from the live stream or from polling. Returns true when done.
+      const handle = data => {
+        if (finished) return true;
+        if (data.error) {
+          finished = true;
+          setRunError(data.error);
+          setBusy(false);
+          return true;
+        }
+        if (data.verdict || ['completed', 'failed', 'rejected'].includes(data.status)) {
+          finished = true;
+          setSubmission(data);
+          setVibeLine(vibe(data.verdict));
+          setBusy(false);
+          fetchHistory();
+          if (data.verdict === 'accepted') onAccepted(submittedProblem);
+          return true;
+        }
+        if (data.status && data.status !== 'connected') setSubmission(current => ({ ...current, ...data }));
+        return false;
+      };
+
+      // Fallback when the live stream drops (e.g. a proxy buffers it): ask every 2 s, up to 3 min.
+      const poll = async (attempt = 0) => {
+        if (finished) return;
+        if (attempt >= 90) {
+          setRunError('The judge is taking unusually long. Check Submissions for the result.');
+          setBusy(false);
+          return;
+        }
+        try {
+          const { data } = await api.get(`/submissions/${submissionId}/status`);
+          if (handle(data)) return;
+        } catch { /* try again */ }
+        setTimeout(() => poll(attempt + 1), 2000);
+      };
+
+      const source = new EventSource(`${API_BASE}/submissions/${submissionId}/stream`, { withCredentials: true });
       streamRef.current?.close();
       streamRef.current = source;
       source.onmessage = event => {
         let data;
         try { data = JSON.parse(event.data); } catch { return; }
-        if (data.error) {
-          setRunError(data.error);
-          setBusy(false);
-          source.close();
-        } else if (data.verdict || ['completed', 'failed', 'rejected'].includes(data.status)) {
-          setSubmission(data);
-          setVibeLine(vibe(data.verdict));
-          setBusy(false);
-          source.close();
-          fetchHistory();
-          if (data.verdict === 'accepted') onAccepted(submittedProblem);
-        } else if (data.status && data.status !== 'connected') {
-          setSubmission(current => ({ ...current, ...data }));
-        }
+        if (handle(data)) source.close();
       };
       source.onerror = () => {
-        setRunError('Lost the live connection to the judge. Check Submissions for the result.');
-        setBusy(false);
         source.close();
-        fetchHistory();
+        if (!finished) poll();
       };
     } catch (error) {
       setRunError(errorMessage(error, 'Submission failed. Check your connection and try again.'));

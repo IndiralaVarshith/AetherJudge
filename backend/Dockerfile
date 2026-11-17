@@ -1,19 +1,20 @@
 # ─────────────────────────────────────────────────────────────
 # STAGE 1: Install production dependencies only
 # ─────────────────────────────────────────────────────────────
-FROM node:18-alpine AS deps
+# Node 22+ is required (google-auth-library needs it).
+FROM node:22-alpine AS deps
 WORKDIR /app
 
 # Copy only package files first (leverages Docker layer caching)
 COPY package*.json ./
 
 # Install prod dependencies (strips devDependencies & caches)
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 # ─────────────────────────────────────────────────────────────
 # STAGE 2: Secure runtime image
 # ─────────────────────────────────────────────────────────────
-FROM node:18-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 
 # 🔒 Security: Create non-root user & group

@@ -1,0 +1,25 @@
+# Public entry point for the AetherJudge API.
+# API_DOMAIN comes from .env.production, e.g. 129-213-45-67.sslip.io (a free name that
+# points at the server's IP). Caddy fetches and renews the HTTPS certificate itself.
+{$API_DOMAIN} {
+	encode gzip
+
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	@backend path /api/* /health
+	handle @backend {
+		reverse_proxy api:5000 {
+			# Send live-verdict (Server-Sent Events) updates immediately.
+			flush_interval -1
+		}
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+}

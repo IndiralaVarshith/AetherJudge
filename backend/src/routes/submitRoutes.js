@@ -97,6 +97,26 @@ router.post("/submit", judgeLimiter, async (req, res) => {
   }
 });
 
+// GET /api/submissions/:id/status → one submission's verdict. Used when the live stream
+// can't be kept open (some proxies buffer it). Same visibility rule as the stream.
+router.get("/submissions/:id/status", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) return res.status(404).json({ error: "Submission not found" });
+    const result = await pool.query(
+      "SELECT user_id, status, verdict, passed_tests, total_tests, created_at FROM submissions WHERE id = $1",
+      [id]
+    );
+    const row = result.rows[0];
+    if (!row || (row.user_id !== null && row.user_id !== req.user?.id)) return res.status(404).json({ error: "Submission not found" });
+    const { user_id: _owner, ...verdict } = row;
+    res.json(verdict);
+  } catch (err) {
+    console.error("Submission status error:", err.message);
+    res.status(500).json({ error: "Could not load the submission" });
+  }
+});
+
 // GET /api/submissions/history → the signed-in user's latest submissions.
 // Guests get an empty list: their submissions are judged but not kept as history.
 router.get("/submissions/history", async (req, res) => {

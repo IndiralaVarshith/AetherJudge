@@ -19,8 +19,8 @@ flowchart TD
         SSEClient["SSE Stream Listener"]
     end
 
-    subgraph Cloud ["Backend VM (Oracle Cloud / VPS - ₹0)"]
-        Nginx["Nginx Reverse Proxy (:80 / :443)"]
+    subgraph Cloud ["Backend VM (Google Cloud e2-micro / VPS - ₹0)"]
+        Caddy["Caddy reverse proxy (HTTPS :443)"]
         
         subgraph InternalNet ["Isolated Docker Network"]
             API["Express.js API (:5000)"]
@@ -37,9 +37,9 @@ flowchart TD
         end
     end
 
-    UI -->|HTTPS REST| Nginx
-    Editor -->|Submit Code| Nginx
-    Nginx -->|Proxy| API
+    UI -->|HTTPS via Vercel /api| Caddy
+    Editor -->|Submit Code| Caddy
+    Caddy -->|Proxy| API
     API -->|Enqueue Job| Redis
     API -->|Record Submission| PG
     Worker -->|BRPOP Job| Redis
@@ -47,8 +47,8 @@ flowchart TD
     Worker -->|Execute Code| JServer
     JServer --> JWorker
     Worker -->|Store Verdict| PG
-    SSEClient <-->|Live Verdict Stream| Nginx
-    Nginx <-->|SSE Stream| API
+    SSEClient <-->|Live Verdict Stream| Caddy
+    Caddy <-->|SSE Stream| API
     API -.->|Poll Updates| PG
 ```
 
@@ -75,13 +75,13 @@ flowchart TD
 | :--- | :--- | :--- |
 | **Frontend** | React 19, Vite, Monaco Editor | App and code editor |
 | **UI libraries** | Motion, cmdk, Sonner, canvas-confetti, react-markdown + KaTeX, react-resizable-panels, Lucide icons | Animation, ⌘K palette, toasts, celebrations, statement rendering, resizable panes, icons |
-| **Hosting (Frontend)**| Vercel (Hobby Free Tier) | Global CDN, free SSL |
+| **Hosting** | Vercel (website) + Google Cloud Always Free e2-micro VM (backend) | Free deployment, see the deployment guide |
 | **Backend API** | Node.js, Express.js 5 | REST API, authentication, live verdicts (SSE) |
 | **Message Broker** | Redis 7 | Submission queue (`code_submission_queue`) |
 | **Worker** | Node.js | Runs each submission against every test case |
 | **Code Execution** | Judge0 Community Edition 1.13.1 (Docker) | Sandboxed compile and run |
 | **Database** | PostgreSQL 16 | Users, problems, test cases, submissions |
-| **Reverse Proxy** | Nginx | Production only: SSL, proxy, SSE buffering |
+| **Reverse Proxy** | Caddy | Production only: automatic free HTTPS, proxy to the API |
 
 ---
 
@@ -284,7 +284,7 @@ These are estimates for the free deployment below, not load-test results.
 
 **People using the site at the same time:** browsing problems, albums and profiles is cheap. A single small server handles a few hundred people at once.
 
-**People submitting at the same time:** Judge0 is the bottleneck. On the free Oracle AMD micro VM (1/8 CPU, 1 GB RAM) one worker judges one submission at a time:
+**People submitting at the same time:** Judge0 is the bottleneck. On the free Google e2-micro VM (2 shared vCPUs that sustain about a quarter of a core, 1 GB RAM) one worker judges one submission at a time:
 - a Python or C++ test takes roughly 0.1–0.5 s; Java takes longer because the JVM starts for every test;
 - a 10-test submission takes about 2–10 s, so the server judges about **6–30 submissions per minute**.
 
@@ -293,68 +293,123 @@ If an active coder submits every 3–5 minutes, that is **about 30–100 people 
 **To grow beyond that:**
 - a bigger x86 server, or more Judge0 workers;
 - Judge0 runs well on cheap x86 VPSs;
-- Oracle's free ARM VMs are larger, but the Judge0 image is x86-only, so it would run under slow emulation there.
+- free ARM VMs (e.g. Oracle Ampere) are larger, but the Judge0 image is x86-only, so it would run under slow emulation there.
 
 ---
 
-## 🌐 ₹0 Cloud Deployment Guide
+## 🌐 ₹0 Deployment: Google Cloud (backend) + Vercel (website)
 
-AetherJudge is engineered for a **completely free (₹0)** two-tier deployment:
-1. **Frontend**: Vercel Free Hobby Tier.
-2. **Backend & Judge0**: Oracle Cloud Infrastructure (OCI) Always Free Compute or any Linux VPS.
+```
+Browser ──► https://<your-site>.vercel.app ──(/api/*)──► https://<ip>.sslip.io ──► Caddy ──► API ─► Postgres / Redis / Judge0
+             Vercel: the website, free                    Google Always Free VM, free HTTPS by Caddy
+```
 
----
+- **Vercel** hosts the website and forwards every `/api/...` request to your server ([frontend/vercel.json](frontend/vercel.json)). The browser only ever talks to the Vercel domain, so the sign-in cookie is first-party and works in every browser, including Safari and iPhones.
+- **The Google Cloud VM** runs everything else with Docker Compose ([docker-compose.prod.yml](docker-compose.prod.yml)). [Caddy](https://caddyserver.com/) in front gets a free Let's Encrypt HTTPS certificate for a free `sslip.io` name that points at the server's IP, so you don't need to buy a domain.
+- Judge0 cannot run on Vercel, Render, Railway or similar hosts: it needs a full x86 VM where Docker can run privileged containers.
+- **Free limits** (Google Always Free): one e2-micro VM in a US region, 30 GB standard disk and 1 GB of outgoing traffic per month. API responses are small JSON, so that's plenty for a small community; beyond it Google charges roughly ₹10 per GB. The server is in the US, so each request from India takes about a quarter of a second longer.
 
-### Tier 1: Frontend Deployment on Vercel (₹0)
+### Step 1: Create the free VM (Google Cloud)
 
-1. Fork or push this repository to your GitHub account (`IndiralaVarshith/AetherJudge`).
-2. Go to **[vercel.com](https://vercel.com)** and sign in with GitHub.
-3. Click **"Add New Project"** $\rightarrow$ select `AetherJudge`.
-4. Configure Project Settings:
-   - **Root Directory**: `frontend`
-   - **Framework Preset**: `Vite`
-   - **Build Command**: `npm run build`
-   - **Output Directory**: `dist`
-5. Under **Environment Variables**, add:
-   - `VITE_API_BASE`: `https://your-backend-domain.com/api` *(or your VM IP: `http://<VM_IP>/api`)*
-6. Click **Deploy**. Vercel will build and assign you a free `https://<project-name>.vercel.app` URL with free global SSL.
+1. Sign up at [cloud.google.com/free](https://cloud.google.com/free) with your Google account. A card is needed to verify your identity. You also get a $300 / 90-day trial; the **Always Free** e2-micro keeps working after it, but when the trial ends Google asks you to *activate a full account* (you're still only billed for usage beyond the free limits).
+2. Protect yourself from surprise bills: **Billing → Budgets & alerts → Create budget**, e.g. ₹100 per month, with email alerts.
+3. **Compute Engine → VM instances** (click *Enable* for the Compute Engine API the first time) **→ Create instance**:
+   - **Region:** `us-central1`, `us-west1` or `us-east1`. Only these three are free; any zone inside them is fine.
+   - **Machine:** series **E2**, type **e2-micro** (2 shared vCPUs, 1 GB RAM). It's x86, which Judge0 needs.
+   - **Boot disk → Change:** **Ubuntu 22.04 LTS (x86/64)**, disk type **Standard persistent disk**, size **30 GB**. (SSD/"balanced" disks are not free.)
+   - **Firewall:** tick **Allow HTTP traffic** and **Allow HTTPS traffic**.
+   - Create. The monthly price shown on this page is before the free tier; the free tier is applied on your bill.
+4. Connect: on the VM list, click **SSH** next to your VM. A terminal opens in your browser, so you don't need SSH keys.
 
----
+> [!NOTE]
+> Keep the VM running. A **reboot** keeps its public IP, but **Stop → Start** can give it a new one. If that happens, run `./deploy.sh` again (it updates the server's address) and update `frontend/vercel.json` (step 4).
 
-### Tier 2: Backend & Sandbox Deployment (₹0 VM)
+### Step 2: Install AetherJudge on the VM
 
-#### OCI Always Free Architecture Assessment
-> [!IMPORTANT]
-> - **Architecture Requirement**: The official Judge0 Community Edition image (`judge0/judge0:latest`) is compiled strictly for **`linux/amd64` (x86_64)**.
-> - **Oracle Cloud VM Choice**: When creating your OCI Always Free instance, select the **AMD Compute instance (`VM.Standard.E2.1.Micro`)** running **Ubuntu 22.04 LTS**. Because this VM is native x86_64, Judge0's sandboxing kernel calls execute natively without emulation crashes.
-> - **RAM Optimization**: OCI AMD Micro instances offer 1 GB RAM. To prevent Out-Of-Memory (OOM) issues during C++ and Java compilations, our automated `deploy.sh` script configures a **4 GB NVMe swapfile**, allowing the entire stack to run stably within free-tier limits.
+On the VM:
+```bash
+git clone https://github.com/IndiralaVarshith/AetherJudge.git
+cd AetherJudge
+git checkout varshith-1        # or main, once merged
+./deploy.sh
+```
 
-#### 1-Click VM Deployment Steps:
+[deploy.sh](deploy.sh) is safe to re-run. It:
+1. checks the VM is x86_64;
+2. switches the kernel to cgroup v1, which Judge0 1.13 needs. **The first run stops here and asks you to `sudo reboot`; reconnect and run `./deploy.sh` again**;
+3. adds 4 GB of swap (the VM has 1 GB RAM);
+4. installs Docker;
+5. opens ports 80/443 in the VM's own firewall;
+6. creates `.env.production` with random secrets and `API_DOMAIN=<your-ip-with-dashes>.sslip.io`;
+7. builds and starts everything and waits for `https://<API_DOMAIN>/health`.
 
-1. **Launch an OCI Always Free VM**:
-   - Shape: `VM.Standard.E2.1.Micro` (AMD, Always Free).
-   - Image: `Ubuntu 22.04 Minimal LTS`.
-   - Security List / Ingress Rules: Allow TCP ports `22`, `80`, and `443`.
+The first build takes several minutes on the small VM. At the end it prints your API address, e.g. `https://129-213-45-67.sslip.io`.
 
-2. **SSH into your VM**:
-   ```bash
-   ssh -i /path/to/key ubuntu@<VM_PUBLIC_IP>
-   ```
+### Step 3: Copy your problems to the server
 
-3. **Clone & Run the 1-Click Installer**:
-   ```bash
-   git clone https://github.com/IndiralaVarshith/AetherJudge.git
-   cd AetherJudge
-   chmod +x deploy.sh
-   ./deploy.sh
-   ```
+The server starts with only the 8 starter problems. Copy your library (≈2–3 MB) from your computer instead of re-importing on the small VM. On **your computer**, in the project folder:
+```bash
+docker exec aether-postgres pg_dump -U admin -d aetherjudge -Fc --data-only -t problems -t test_cases -f /tmp/problems.dump
+docker cp aether-postgres:/tmp/problems.dump ./problems.dump
+```
+Upload `problems.dump` to the VM: in the browser SSH window, click **Upload file** (top right) and pick it. It lands in your home folder.
 
-The script automatically:
-- Installs Docker & Docker Compose plugin.
-- Creates and enables a 4 GB swapfile.
-- Opens firewall ports (80, 443).
-- Builds and starts the unified production stack ([docker-compose.prod.yml](docker-compose.prod.yml)).
-- Runs health checks to confirm all 9 services are operational.
+Then **on the VM**. This replaces the server's problems, so do it before people start submitting:
+```bash
+cd ~/AetherJudge && mv ~/problems.dump .
+docker cp problems.dump aether-postgres:/tmp/problems.dump
+docker exec aether-postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "TRUNCATE problems RESTART IDENTITY CASCADE" && pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --data-only --disable-triggers /tmp/problems.dump'
+```
+`pg_dump` prints a warning about circular foreign keys. That's expected; `--disable-triggers` handles it.
+
+Alternatively, run the importers on the server, e.g. `docker exec aether-api npm run import:exercism`. This is slower and the TACO import needs a lot of memory.
+
+### Step 4: Put the website on Vercel
+
+1. In [frontend/vercel.json](frontend/vercel.json), replace `YOUR-API-DOMAIN` with your API domain from step 2 (e.g. `129-213-45-67.sslip.io`), then commit and push.
+2. At [vercel.com](https://vercel.com), sign in with GitHub → **Add New → Project** → import `AetherJudge`:
+   - **Root Directory:** `frontend` (the framework, build command and output are read from `vercel.json`);
+   - **Environment variables:** none. Leave `VITE_API_BASE` unset so the site uses its own `/api`.
+3. **Settings → Git → Production Branch:** set it to the branch you deploy (e.g. `varshith-1`), or merge into `main`. Other branches become preview deployments, which Vercel protects with a login by default.
+4. Deploy. You get `https://<project>.vercel.app`.
+
+### Step 5: Connect the two
+
+On the VM, edit `~/AetherJudge/.env.production`:
+```bash
+CLIENT_ORIGIN=https://<project>.vercel.app
+GOOGLE_CLIENT_ID=<same client id as in backend/.env>
+```
+Apply it:
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+```
+In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), open your OAuth client and add `https://<project>.vercel.app` under **Authorized JavaScript origins**.
+
+### Updating later
+
+On the VM:
+```bash
+cd ~/AetherJudge && git pull && ./deploy.sh
+```
+Vercel redeploys the website automatically on every push.
+
+### Useful commands on the VM
+
+```bash
+cd ~/AetherJudge
+C="docker compose --env-file .env.production -f docker-compose.prod.yml"
+$C ps                       # status of all containers
+$C logs -f api worker       # API and judge logs
+$C logs caddy               # HTTPS certificate problems
+$C restart api worker       # restart the app
+```
+
+> [!NOTE]
+> **Back up the database.** Nothing backs it up automatically yet. A simple manual backup:
+> ```bash
+> docker exec aether-postgres pg_dump -U aether_admin -d aetherjudge -Fc > backup-$(date +%F).dump
+> ```
 
 ---
 
@@ -407,10 +462,19 @@ docker ps                                  # containers
 | Submissions stay on "In the queue…" | Worker not running | `npm run worker` in `backend/` |
 | Judging is slow | Judge0 runs under emulation on Apple Silicon | Expected locally; x86 servers are much faster |
 
-### Production (Docker Compose)
+### Production
+
+| Symptom | Fix |
+| :--- | :--- |
+| `deploy.sh` stopped and asked to reboot | Expected once (cgroup v1 for Judge0): `sudo reboot`, reconnect, run `./deploy.sh` again |
+| `https://<API_DOMAIN>/health` doesn't answer | The VM needs **Allow HTTP/HTTPS traffic** ticked (VM → Edit → Firewall). Then wait a minute for the certificate. Then check `docker compose --env-file .env.production -f docker-compose.prod.yml logs caddy` |
+| Website loads but shows "Could not reach AetherJudge" | `frontend/vercel.json` still says `YOUR-API-DOMAIN`, or points to the wrong domain. Fix, push, and let Vercel redeploy |
+| Google button missing or "origin not allowed" | Set `GOOGLE_CLIENT_ID` in `.env.production` and restart; add the Vercel URL to the OAuth client's Authorized JavaScript origins |
+| Every submission says "runtime error" | Judge0 sandbox problem, usually cgroup v2. On the VM, `stat -fc %T /sys/fs/cgroup` must print `tmpfs`, not `cgroup2fs` |
+| Out of memory, containers restarting | Check that the swap exists (`swapon --show`); use a VM with more RAM if it keeps happening |
+
 ```bash
-curl http://localhost/health
-docker compose -f docker-compose.prod.yml logs -f api
-docker compose -f docker-compose.prod.yml logs -f worker
-git pull origin main && docker compose -f docker-compose.prod.yml up -d --build
+curl https://<API_DOMAIN>/health
+docker compose --env-file .env.production -f docker-compose.prod.yml logs -f api worker
+cd ~/AetherJudge && git pull && ./deploy.sh      # update
 ```
