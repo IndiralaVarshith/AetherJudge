@@ -4,9 +4,65 @@ const { getJob } = require("./queueService");
 const { connectRedis } = require("./redisClient");
 const pool = require("../src/db"); // ✅ DB connection
 const { submitToJudge0, getResult } = require("./judge0Service");
+const { runBatch, supportsBatch } = require("./batchRunner");
 
 let isShuttingDown = false;
 let currentJobId = null;
+
+// Compare line by line, ignoring trailing spaces and trailing blank lines.
+const normalizeOutput = text =>
+  (text || "").replace(/\r\n?/g, "\n").split("\n").map(line => line.trimEnd()).join("\n").trim();
+
+async function saveVerdict(submissionId, verdict, passed, totalTests, token) {
+  await pool.query(
+    `UPDATE submissions
+     SET status=$1, verdict=$2, passed_tests=$3, total_tests=$4, judge0_token=$5
+     WHERE id=$6`,
+    ["completed", verdict, passed, totalTests, token || null, submissionId]
+  );
+  console.log(`✅ Job ${submissionId} → ${verdict} (${passed}/${totalTests})`);
+}
+
+// Judges all tests in one Judge0 run (see batchRunner.js). Tests are checked in order
+// and judging stops at the first failure, like the per-test path.
+async function judgeBatch(job, problem, tests) {
+  let attempt = 0;
+  for (;;) {
+    try {
+      const run = await runBatch({
+        languageId: job.language_id,
+        code: job.code,
+        inputs: tests.map(tc => tc.input),
+        timeLimit: problem.time_limit,
+      });
+      return { ...scoreBatch(run, tests), judge0: run.judge0 };
+    } catch (err) {
+      attempt++;
+      console.warn(`⚠️ Judge0 batch attempt ${attempt}/3 failed: ${err.message}`);
+      if (attempt >= 3) throw err;
+      await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+    }
+  }
+}
+
+function scoreBatch(run, tests) {
+  if (run.compileError !== undefined) return { verdict: "compilation_error", passed: 0 };
+  const status = run.judge0.status.id;
+  let passed = 0;
+  for (let i = 0; i < tests.length; i++) {
+    const test = run.results[i];
+    // The whole batch ran out of time before reaching this test.
+    if (!test) return { verdict: status === 3 ? "runtime_error" : "time_limit_exceeded", passed };
+    const timedOut = test.code === 124 || (test.code === 137 && test.ms >= run.timeoutSeconds * 1000);
+    if (timedOut) return { verdict: "time_limit_exceeded", passed };
+    if (test.code !== 0) return { verdict: "runtime_error", passed };
+    if (normalizeOutput(test.stdout) !== normalizeOutput(tests[i].expected_output)) {
+      return { verdict: "wrong_answer", passed };
+    }
+    passed++;
+  }
+  return { verdict: "accepted", passed };
+}
 
 async function processJob(job) {
   currentJobId = job.id; // ✅ Track active job at start
@@ -32,7 +88,7 @@ async function processJob(job) {
     }
 
     const testCases = await pool.query(
-      "SELECT input, expected_output FROM test_cases WHERE problem_id = $1",
+      "SELECT input, expected_output FROM test_cases WHERE problem_id = $1 ORDER BY id",
       [job.problem_id]
     );
 
@@ -40,7 +96,16 @@ async function processJob(job) {
     let passed = 0;
     let verdict = "accepted";
 
-    // 2. Run against each test case with retry logic
+    // 2a. Usual path: compile once and run every test in a single Judge0 run.
+    if (totalTests > 0 && supportsBatch(job.language_id)) {
+      const outcome = await judgeBatch(job, problemRes.rows[0], testCases.rows);
+      ({ passed, verdict } = outcome);
+      result = outcome.judge0;
+      await saveVerdict(submissionId, verdict, passed, totalTests, result?.token);
+      return;
+    }
+
+    // 2b. Fallback: one Judge0 submission per test, with retries.
     for (const tc of testCases.rows) {
       let attempts = 0;
       const maxAttempts = 3;
@@ -128,23 +193,7 @@ async function processJob(job) {
     }
 
     // 3. Update DB with verdict
-    await pool.query(
-      `UPDATE submissions 
-       SET status=$1, verdict=$2, passed_tests=$3, total_tests=$4, judge0_token=$5 
-       WHERE id=$6`,
-      [
-        "completed",
-        verdict,
-        passed,
-        totalTests,
-        result?.token || null,
-        submissionId
-      ]
-    );
-
-    console.log(
-      `✅ Job ${submissionId} → ${verdict} (${passed}/${totalTests})`
-    );
+    await saveVerdict(submissionId, verdict, passed, totalTests, result?.token);
 
   } catch (err) {
     // ✅ Move to DLQ after complete processing failure

@@ -44,6 +44,7 @@ export const VERDICT_VIBES = {
   wrong_answer: ['So close. Check the edge cases 👀', 'Not quite. Re-read the statement 📜', 'Plot twist: the answer differs 🌀'],
   time_limit_exceeded: ['Too slow, bestie. Think about Big-O ⏳', 'The judge got bored waiting 💤'],
   runtime_error: ['It crashed. Check indexes and input parsing 💥', 'Runtime said no 🙅'],
+  compilation_error: ['It didn\'t compile. Check the error line 🛠️', 'Compiler said nope. Typo hunt time 🔍'],
 };
 
 export const vibe = verdict => {

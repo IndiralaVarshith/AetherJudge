@@ -100,6 +100,10 @@ Code runs inside **Judge0**, which compiles and executes it in an isolated sandb
 - Programs read from **standard input** and print to **standard output**. Starter code is beginner-friendly (`input()` in Python, `scanf` in C, `cin` in C++, `Scanner` in Java).
 - Java code must use `public class Main`.
 
+**How a submission is judged.** The worker ([backend/redisQueue/worker.js](backend/redisQueue/worker.js)) sends **one** Judge0 run per submission ([backend/redisQueue/batchRunner.js](backend/redisQueue/batchRunner.js)). It is a generated Bash script (Judge0 language 46) that compiles the code once, then runs every test in order, each with its own wall-clock limit (twice the problem's time limit, at least 2 s), and stops at the first crash or timeout. The worker compares outputs line by line, ignoring trailing spaces. Verdicts: `accepted`, `wrong_answer`, `time_limit_exceeded`, `runtime_error`, `compilation_error`.
+- This replaced one Judge0 submission per test, which recompiled C, C++ and Java for every test. On the free e2-micro a 3-test C++ submission went from about 24 s to a few seconds.
+- The batch needs `MAX_WALL_TIME_LIMIT=90` in [judge0/judge0.conf](judge0/judge0.conf); restart Judge0 after changing that file. Problems have at most 20 tests, which fit easily.
+
 **Why Judge0, and is there something newer?** Judge0 CE is free, open source, sandboxed and handles test cases and limits for us. Its last release (1.13.1, April 2024) still ships 2019–2020 compilers. The main free alternative, [Piston](https://github.com/engineer-man/piston), offers Python 3.12, GCC 10.2 and Java 15. That is only modestly newer and it would mean rewriting the worker, so we stay on Judge0 for now.
 
 ---
@@ -285,8 +289,8 @@ These are estimates for the free deployment below, not load-test results.
 **People using the site at the same time:** browsing problems, albums and profiles is cheap. A single small server handles a few hundred people at once.
 
 **People submitting at the same time:** Judge0 is the bottleneck. On the free Google e2-micro VM (2 shared vCPUs that sustain about a quarter of a core, 1 GB RAM) one worker judges one submission at a time:
-- a Python or C++ test takes roughly 0.1–0.5 s; Java takes longer because the JVM starts for every test;
-- a 10-test submission takes about 2–10 s, so the server judges about **6–30 submissions per minute**.
+- each submission is compiled once and all its tests run in one sandbox (see "How a submission is judged");
+- measured before that change, a 3-test submission took about 5–8 s in Python and 20–24 s in C++ and Java, because they were recompiled for every test; with one compile per submission C++ and Java are expected to drop to a few seconds (measured locally: 3–5 s end to end, including the compile), so the server judges very roughly **10–30 submissions per minute**.
 
 If an active coder submits every 3–5 minutes, that is **about 30–100 people coding at the same moment** before the queue starts to lag. Extra submissions wait in the queue rather than fail, and the per-user rate limit keeps one person from hogging it.
 
