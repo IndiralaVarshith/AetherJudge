@@ -473,6 +473,8 @@ docker ps                                  # containers
 | Google button missing or "origin not allowed" | Set `GOOGLE_CLIENT_ID` in `.env.production` and restart; add the Vercel URL to the OAuth client's Authorized JavaScript origins |
 | Every submission says "runtime error" | Judge0 sandbox problem, usually cgroup v2. On the VM, `stat -fc %T /sys/fs/cgroup` must print `tmpfs`, not `cgroup2fs` |
 | `deploy.sh` says the kernel has no cgroup v1 memory controller | The VM runs Ubuntu 24.04 (or another new kernel). Delete it and create it again with **Ubuntu 22.04 LTS** |
+| `deploy.sh` ends with "container aether-postgres is unhealthy" on the first run | The small VM was still creating the database. Run `./deploy.sh` again; everything is downloaded by then, so it only starts the remaining containers |
+| The first `deploy.sh` run takes 1–3 hours | Expected on an e2-micro: unpacking the 14 GB Judge0 image is CPU-bound and the free VM is throttled to about a quarter of a core. Later runs reuse the image and take minutes. Watch progress with `tail -f ~/deploy.log` when started in the background (`setsid nohup ./deploy.sh > ~/deploy.log 2>&1 &`) |
 | Out of memory, containers restarting | Check that the swap exists (`swapon --show`); use a VM with more RAM if it keeps happening |
 
 ```bash

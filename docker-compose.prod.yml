@@ -16,8 +16,11 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-admin} -d ${DB_NAME:-aetherjudge}"]
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout: 10s
+      retries: 10
+      # First start creates the database and runs init.sql; on a throttled free VM
+      # (while Judge0 also starts) that can take minutes.
+      start_period: 300s
     networks:
       - aether_internal
 
@@ -34,8 +37,9 @@ services:
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout: 10s
+      retries: 10
+      start_period: 120s
     networks:
       - aether_internal
 
