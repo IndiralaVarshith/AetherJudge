@@ -335,7 +335,6 @@ On the VM:
 ```bash
 git clone https://github.com/IndiralaVarshith/AetherJudge.git
 cd AetherJudge
-git checkout varshith-1        # or main, once merged
 ./deploy.sh
 ```
 
@@ -375,7 +374,7 @@ Alternatively, run the importers on the server, e.g. `docker exec aether-api npm
 2. At [vercel.com](https://vercel.com), sign in with GitHub → **Add New → Project** → import `AetherJudge`:
    - **Root Directory:** `frontend` (the framework, build command and output are read from `vercel.json`);
    - **Environment variables:** none. Leave `VITE_API_BASE` unset so the site uses its own `/api`.
-3. **Settings → Git → Production Branch:** set it to the branch you deploy (e.g. `varshith-1`), or merge into `main`. Other branches become preview deployments, which Vercel protects with a login by default.
+3. **Settings → Environments → Production → Branch Tracking:** keep it on `main` (the default). Every push to `main` redeploys the site; other branches become preview deployments, which Vercel protects with a login by default.
 4. Deploy. You get `https://<project>.vercel.app`.
 
 ### Step 5: Connect the two
@@ -397,7 +396,12 @@ On the VM:
 ```bash
 cd ~/AetherJudge && git pull && ./deploy.sh
 ```
-Vercel redeploys the website automatically on every push.
+Both the VM and Vercel follow the `main` branch: push to `main`, run the command above on the VM, and Vercel redeploys the website by itself.
+
+If the update changed [judge0/judge0.conf](judge0/judge0.conf), also recreate Judge0 so it reads the new file (a restart is not enough, because `git pull` replaces the file the container has mounted). Judge0 then needs a few minutes to boot on the free VM:
+```bash
+sudo docker compose --env-file .env.production -f docker-compose.prod.yml up -d --no-build --force-recreate judge0-server judge0-worker
+```
 
 ### Useful commands on the VM
 
